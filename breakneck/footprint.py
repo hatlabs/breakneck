@@ -10,12 +10,12 @@ from kipy.board import BoardLayer as BL
 
 import breakneck.conversions
 import breakneck.courtyard
-import breakneck.tracks
+import breakneck.track
 from breakneck.base import Coords2D
 
 
 @dataclass
-class FootprintCrossings:
+class BNFootprint:
     ref: str
     footprint: kipy.board_types.FootprintInstance
     front_courtyards: list[sg.Polygon] = field(default_factory=list)
@@ -53,7 +53,7 @@ class FootprintCrossings:
         else:
             courtyards = self.back_courtyards
 
-        unique_widths = breakneck.tracks.get_unique_track_widths(tracks)
+        unique_widths = breakneck.track.get_unique_track_widths(tracks)
 
         padding = 10000
 
@@ -63,7 +63,7 @@ class FootprintCrossings:
 
         for track, linestring in zip(tracks, linestrings):
             track_points = []
-            rounded_track_width = breakneck.tracks.round_track_width(
+            rounded_track_width = breakneck.track.round_track_width(
                 track.width, width_tol_nm
             )
             if rounded_track_width not in buffered_courtyards:
@@ -108,7 +108,7 @@ class FootprintCrossings:
         if self.front_courtyards:
             print("Breaking front tracks")
             front_tracks = [t for t in all_tracks if t.layer == BL.BL_F_Cu]
-            front_track_tree = breakneck.tracks.TrackTree(front_tracks)
+            front_track_tree = breakneck.track.TrackTree(front_tracks)
             print("Finding bounding box hits")
             front_hits = front_track_tree.bounding_box_hit(
                 self.front_courtyards, max_width
@@ -118,14 +118,14 @@ class FootprintCrossings:
                 print("Finding crossings")
                 front_crossings = self.find_crossings(tracks, linestrings, front=True)
                 for track, points in front_crossings.items():
-                    new_tracks = breakneck.tracks.break_track(track, points)
+                    new_tracks = breakneck.track.break_track(track, points)
                     items_to_remove.append(track)
                     items_to_create.extend(new_tracks)
 
         if self.back_courtyards:
             print("Breaking back tracks")
             back_tracks = [t for t in all_tracks if t.layer == BL.BL_B_Cu]
-            back_track_tree = breakneck.tracks.TrackTree(back_tracks)
+            back_track_tree = breakneck.track.TrackTree(back_tracks)
             print("Finding bounding box hits")
             back_hits = back_track_tree.bounding_box_hit(
                 self.back_courtyards, max_width
@@ -135,48 +135,8 @@ class FootprintCrossings:
                 print("Finding crossings")
                 back_crossings = self.find_crossings(tracks, linestrings, front=False)
                 for track, points in back_crossings.items():
-                    new_tracks = breakneck.tracks.break_track(track, points)
+                    new_tracks = breakneck.track.break_track(track, points)
                     items_to_remove.append(track)
                     items_to_create.extend(new_tracks)
 
         return items_to_remove, items_to_create
-
-
-def break_tracks(board: kipy.board.Board) -> None:
-    """
-    Break all tracks crossing the courtyards of all footprints on a board.
-    """
-    print("Getting all tracks")
-    all_tracks = board.get_tracks()
-    print("Getting all courtyards")
-    all_courtyards = breakneck.courtyard.get_all_courtyards(board)
-
-    all_tracks = {t.id.value: t for t in board.get_tracks()}
-    max_width = max(t.width for t in all_tracks.values())
-    remove_dict = {}
-    create_dict = {}
-
-    for fpc in all_courtyards:
-        print(f"Breaking tracks for {fpc.ref}")
-        items_to_remove, items_to_create = fpc.break_tracks(
-            list(all_tracks.values()), max_width
-        )
-
-        # remove items from all_tracks and create_list
-        for item in items_to_remove:
-            all_tracks.pop(item.id.value)
-            create_dict.pop(item.id.value, None)
-
-        # add new items to all_tracks and create_list
-        for item in items_to_create:
-            all_tracks[item.id.value] = item
-            create_dict[item.id.value] = item
-
-        # add items to remove_list
-        for item in items_to_remove:
-            remove_dict[item.id.value] = item
-
-    commit = board.begin_commit()
-    board.remove_items(list(remove_dict.values()))
-    board.create_items(list(create_dict.values()))
-    board.push_commit(commit)

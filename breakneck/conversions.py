@@ -248,20 +248,6 @@ def build_shape_adjacency_graph(
     return adjacency, shape_map
 
 
-def _validate_adjacencies(
-    adjacency: dict[Coords2D, list[Coords2D]],
-) -> bool:
-    """Validate that the adjacencies form a closed shape.
-
-    Each adjacency point must have exactly two neighbors.
-    """
-    for point, neighbors in adjacency.items():
-        if len(neighbors) != 2:
-            return False
-
-    return True
-
-
 def _reverse_segment(segment: kbt.BoardSegment) -> None:
     segment.start, segment.end = segment.end, segment.start
 
