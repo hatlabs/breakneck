@@ -6,6 +6,7 @@ from kipy.board import BoardLayer as BL
 from kipy.proto.board import board_types_pb2
 
 import kifnd.conversions
+import kifnd.footprint
 
 
 def get_courtyard_shapes(
@@ -23,19 +24,30 @@ def get_courtyard_polygons(
 ) -> tuple[list[sg.Polygon], list[sg.Polygon]]:
     """Get the front and back courtyard polygons of a footprint."""
 
-    f_crtyds = get_courtyard_shapes(footprint, BL.BL_F_CrtYd)
-    f_polys = kifnd.conversions.as_polygons(f_crtyds, 1000)
-    b_crtyds = get_courtyard_shapes(footprint, BL.BL_B_CrtYd)
-    b_polys = kifnd.conversions.as_polygons(b_crtyds, 1000)
+    f_crtyd_shapes = get_courtyard_shapes(footprint, BL.BL_F_CrtYd)
+    f_polys = kifnd.conversions.as_polygons(f_crtyd_shapes, 1000)
+    b_crtyd_shapes = get_courtyard_shapes(footprint, BL.BL_B_CrtYd)
+    b_polys = kifnd.conversions.as_polygons(b_crtyd_shapes, 1000)
 
     return f_polys, b_polys
 
 
-def get_all_courtyard_polygons(
+def get_all_courtyards(
     board: kipy.board.Board,
-) -> list[
-    tuple[kipy.board_types.FootprintInstance, list[sg.Polygon], list[sg.Polygon]]
-]:
+) -> list[kifnd.footprint.FootprintCrossings,]:
     """Get the front and back courtyard polygons of all footprints on a board."""
 
-    return [(fp, *get_courtyard_polygons(fp)) for fp in board.get_footprints()]
+    fpcs: list[kifnd.footprint.FootprintCrossings] = []
+
+    for fp in board.get_footprints():
+        f_polys, b_polys = get_courtyard_polygons(fp)
+        fpcs.append(
+            kifnd.footprint.FootprintCrossings(
+                ref=fp.reference_field.text.value,
+                footprint=fp,
+                front_courtyards=f_polys,
+                back_courtyards=b_polys,
+            )
+        )
+
+    return fpcs

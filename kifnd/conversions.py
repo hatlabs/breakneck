@@ -17,7 +17,7 @@ OpenShapes = list[OpenShape]
 ClosedShapes = list[ClosedShape]
 
 
-def _point_as_coords(point: kipy.geometry.Vector2) -> Coords2D:
+def vector2_as_coords(point: kipy.geometry.Vector2) -> Coords2D:
     """
     Convert a point to coordinates in millimeters with y-up orientation.
     """
@@ -25,50 +25,60 @@ def _point_as_coords(point: kipy.geometry.Vector2) -> Coords2D:
     return Coords2D(point.x, -point.y)
 
 
-def _track_as_shapely_linestring(track: kbt.Track) -> sg.LineString:
-    return sg.LineString(
-        [_point_as_coords(track.start).as_tuple(), _point_as_coords(track.end)]
-    )
+def coords_as_vector2(coords: Coords2D) -> kipy.geometry.Vector2:
+    """
+    Convert coordinates in millimeters with y-up orientation to a point.
+    """
+    return kipy.geometry.Vector2.from_xy(coords.x, -coords.y)
+
+
+def track_as_linestring(track: kbt.Track | kbt.ArcTrack) -> sg.LineString:
+    if isinstance(track, kbt.Track):
+        return sg.LineString(
+            [vector2_as_coords(track.start).as_tuple(), vector2_as_coords(track.end)]
+        )
+    else:
+        return arc_as_linestring(track)
 
 
 def _polyline_as_coords(polyline: kipy.geometry.PolyLine) -> list[Coords2D]:
-    return [_point_as_coords(node.point) for node in polyline.nodes]
+    return [vector2_as_coords(node.point) for node in polyline.nodes]
 
 
 def _polyline_as_tuples(polyline: kipy.geometry.PolyLine) -> list[tuple[int, int]]:
     return [coords.as_tuple() for coords in _polyline_as_coords(polyline)]
 
 
-def _polygon_as_shapely(polygon: kipy.geometry.PolygonWithHoles) -> sg.Polygon:
+def polygon_as_shapely_polygon(polygon: kipy.geometry.PolygonWithHoles) -> sg.Polygon:
     coords = _polyline_as_tuples(polygon.outline)
     holes = [_polyline_as_tuples(hole) for hole in polygon.holes]
     return sg.Polygon(coords, holes)
 
 
-def _board_polygon_as_shapely_polygons(
+def board_polygon_as_polygons(
     polygon: kbt.BoardPolygon,
 ) -> list[sg.Polygon]:
     polygons: list[sg.Polygon] = []
     for poly in polygon.polygons:
-        polygons.append(_polygon_as_shapely(poly))
+        polygons.append(polygon_as_shapely_polygon(poly))
     return polygons
 
 
-def _board_segment_as_linestring(
+def board_segment_as_linestring(
     segment: kbt.BoardSegment,
 ) -> sg.LineString:
     return sg.LineString(
-        [_point_as_coords(segment.start), _point_as_coords(segment.end)]
+        [vector2_as_coords(segment.start), vector2_as_coords(segment.end)]
     )
 
 
-def _board_segments_as_linestrings(
+def board_segments_as_linestrings(
     boardsegments: list[kbt.BoardSegment],
 ) -> list[sg.LineString]:
-    return [_board_segment_as_linestring(bs) for bs in boardsegments]
+    return [board_segment_as_linestring(bs) for bs in boardsegments]
 
 
-def _board_rectangle_as_polygon(
+def board_rectangle_as_polygon(
     rectangle: kbt.BoardRectangle,
 ) -> sg.Polygon:
     # Get corner coordinates
@@ -83,12 +93,12 @@ def _board_rectangle_as_polygon(
     return sg.Polygon(coords)
 
 
-def _arc_as_shapely_linestring(
+def arc_as_linestring(
     arc: kipy.common_types.Arc | kbt.ArcTrack,
 ) -> sg.LineString:
     # Get the start and end points of the arc
-    start = _point_as_coords(arc.start)
-    mid = _point_as_coords(arc.mid)
+    start = vector2_as_coords(arc.start)
+    mid = vector2_as_coords(arc.mid)
 
     # Calculate the center of the arc
     arc_center = arc.center()
@@ -97,7 +107,7 @@ def _arc_as_shapely_linestring(
         # Return an empty line string for degenerate arcs
         return sg.LineString([])
 
-    center = _point_as_coords(arc_center)
+    center = vector2_as_coords(arc_center)
 
     # Calculate the radius of the arc
     radius = int(arc.radius())
@@ -112,6 +122,10 @@ def _arc_as_shapely_linestring(
     end_angle = arc.end_angle()
     assert start_angle is not None
     assert end_angle is not None
+
+    # kipy coordinates are y-down but we use y-up. Adjust angles accordingly
+    start_angle = -start_angle
+    end_angle = -end_angle
 
     if cross_product > 0:  # Counterclockwise
         if end_angle < start_angle:
@@ -137,11 +151,11 @@ def _arc_as_shapely_linestring(
     return sg.LineString(arc_points)
 
 
-def _board_circle_as_polygon(
+def board_circle_as_polygon(
     circle: kbt.BoardCircle, num_points: int = 360
 ) -> sg.Polygon:
     # Get the center of the circle
-    center = _point_as_coords(circle.center)
+    center = vector2_as_coords(circle.center)
 
     # Get the radius of the circle
     radius = int(circle.radius())
@@ -159,51 +173,23 @@ def _board_circle_as_polygon(
     return sg.Polygon(circle_points)
 
 
-def track_as_shapely(track: kbt.Track) -> sg.LineString:
-    return _track_as_shapely_linestring(track)
-
-
-def board_segment_as_shapely(segment: kbt.BoardSegment) -> sg.LineString:
-    return _board_segment_as_linestring(segment)
-
-
-def board_polygon_as_shapely(polygon: kbt.BoardPolygon) -> list[sg.Polygon]:
-    return _board_polygon_as_shapely_polygons(polygon)
-
-
-def board_rectangle_as_shapely(rectangle: kbt.BoardRectangle) -> sg.Polygon:
-    return _board_rectangle_as_polygon(rectangle)
-
-
-def arc_as_shapely(arc: kbt.BoardArc | kbt.ArcTrack) -> sg.LineString:
-    return _arc_as_shapely_linestring(arc)
-
-
-def board_circle_as_shapely(circle: kbt.BoardCircle) -> sg.Polygon:
-    return _board_circle_as_polygon(circle)
-
-
 def polyline_as_shapely(polyline: kipy.geometry.PolyLine) -> sg.LineString:
     return sg.LineString(_polyline_as_tuples(polyline))
 
 
-def polygon_as_shapely(polygon: kipy.geometry.PolygonWithHoles) -> sg.Polygon:
-    return _polygon_as_shapely(polygon)
-
-
-def closed_shapes_as_shapely(shapes: ClosedShapes) -> list[sg.Polygon]:
+def closed_shapes_as_polygon(shapes: ClosedShapes) -> list[sg.Polygon]:
     geometries = []
     for shape in shapes:
         if isinstance(shape, kbt.BoardRectangle):
-            geometries.append(board_rectangle_as_shapely(shape))
+            geometries.append(board_rectangle_as_polygon(shape))
         elif isinstance(shape, kbt.BoardCircle):
-            geometries.append(board_circle_as_shapely(shape))
+            geometries.append(board_circle_as_polygon(shape))
         elif isinstance(shape, kbt.BoardPolygon):
-            geometries.extend(board_polygon_as_shapely(shape))
+            geometries.extend(board_polygon_as_polygons(shape))
     return geometries
 
 
-def open_shapes_as_shapely(shapes: OpenShapes, tol_nm: int) -> list[sg.Polygon]:
+def open_shapes_as_polygon(shapes: OpenShapes, tol_nm: int) -> list[sg.Polygon]:
     """
     Convert a list of open shapes to a list of shapely polygons
     """
@@ -213,10 +199,10 @@ def open_shapes_as_shapely(shapes: OpenShapes, tol_nm: int) -> list[sg.Polygon]:
         coords = []
         for shape in chain:
             if isinstance(shape, kbt.BoardSegment):
-                coords.append(_point_as_coords(shape.start).as_tuple())
+                coords.append(vector2_as_coords(shape.start).as_tuple())
             elif isinstance(shape, kbt.BoardArc):
-                coords.append(_point_as_coords(shape.start).as_tuple())
-                coords.extend(_arc_as_shapely_linestring(shape).coords[1:-1])
+                coords.append(vector2_as_coords(shape.start).as_tuple())
+                coords.extend(arc_as_linestring(shape).coords[1:-1])
             else:
                 raise ValueError(f"Shape {type(shape)} not supported")
         coords.append(coords[0])
@@ -295,57 +281,81 @@ def _reverse_shape(shape: kbt.BoardShape) -> None:
 
 
 def _extract_chain(
-    start: Coords2D,  # Tolerance-adjusted starting point
-    shape_map: dict[Coords2D, list[OpenShape]],
+    shape: OpenShape,
+    shapes: OpenShapes,
     visited_shapes: set[OpenShape],
     tol_nm: int,
 ) -> OpenShapes:
     """Extract a chain of connected shapes from a starting point."""
     ordered_shapes = []
-    current_point = start
 
-    while current_point in shape_map:
-        # Get unvisited segments connected to this point
-        candidates = [
-            seg for seg in shape_map[current_point] if seg not in visited_shapes
-        ]
-        if not candidates:
-            break  # Polygon is complete or no valid path
+    visited_shapes.add(shape)
+    chain_start, end = _get_endpoints(shape, tol_nm)
+    ordered_shapes.append(shape)
 
-        next_shape = candidates[0]
-        visited_shapes.add(next_shape)
+    while True:
+        # Find a connected shape: start or end point should equal to
+        # the end point of the last shape
 
-        next_start, next_end = _get_endpoints(next_shape, tol_nm)
-        if next_start == current_point:
-            current_point = next_end
-        else:
-            _reverse_shape(next_shape)
-            current_point = next_start
+        found = False
 
-        ordered_shapes.append(next_shape)
+        for next_shape in shapes:
+            if next_shape in visited_shapes:
+                continue
+
+            next_start, next_end = _get_endpoints(next_shape, tol_nm)
+
+            if end == next_start:
+                ordered_shapes.append(next_shape)
+                visited_shapes.add(next_shape)
+                end = next_end
+                found = True
+                break
+            elif end == next_end:
+                _reverse_shape(next_shape)
+                ordered_shapes.append(next_shape)
+                visited_shapes.add(next_shape)
+                end = next_start
+                found = True
+                break
+
+        if not found:
+            break
 
     return ordered_shapes
 
 
 def _chain_shapes(shapes: OpenShapes, tol_nm: int) -> list[OpenShapes]:
     """Convert a list of unordered BoardShapes to chains of shapes."""
-    # Build an adjacency graph
-    adjacency, shape_map = build_shape_adjacency_graph(shapes, tol_nm)
 
-    if not _validate_adjacencies(adjacency):
-        raise ValueError("Shapes do not form a closed polygon.")
+    # Courtyards are so simple that a graph is not needed
 
     # Start traversing the shapes
     ordered_chains: list[OpenShapes] = []
     visited_shapes = set()
 
-    for point in adjacency.keys():
-        if point in visited_shapes:
+    for shape in shapes:
+        if shape in visited_shapes:
             continue
-        chain = _extract_chain(point, shape_map, visited_shapes, tol_nm)
-        ordered_chains.append(chain)
+        chain = _extract_chain(shape, shapes, visited_shapes, tol_nm)
+        if chain:
+            ordered_chains.append(chain)
 
     return ordered_chains
+
+
+def _chain_as_polygon(chain: OpenShapes) -> sg.Polygon:
+    coords = []
+    for shape in chain:
+        if isinstance(shape, kbt.BoardSegment):
+            coords.append(vector2_as_coords(shape.start).as_tuple())
+        elif isinstance(shape, kbt.BoardArc):
+            coords.append(vector2_as_coords(shape.start).as_tuple())
+            coords.extend(arc_as_linestring(shape).coords[1:-1])
+        else:
+            raise ValueError(f"Shape {type(shape)} not supported")
+    coords.append(coords[0])
+    return sg.Polygon(coords)
 
 
 def as_polygons(shapes: list[kbt.BoardShape], tol_nm: int) -> list[sg.Polygon]:
@@ -363,23 +373,11 @@ def as_polygons(shapes: list[kbt.BoardShape], tol_nm: int) -> list[sg.Polygon]:
         else:
             raise ValueError(f"Shape {type(shape)} not supported")
 
-    polygons = closed_shapes_as_shapely(closed_shapes)
+    polygons = closed_shapes_as_polygon(closed_shapes)
 
     chains = _chain_shapes(open_shapes, tol_nm)
 
     for chain in chains:
-        coords = []
-        for shape in chain:
-            if isinstance(shape, kbt.BoardSegment):
-                coords.append(_point_as_coords(shape.start).as_tuple())
-            elif isinstance(shape, kbt.BoardArc):
-                coords.append(_point_as_coords(shape.start).as_tuple())
-                coords.extend(_arc_as_shapely_linestring(shape).coords)
-            else:
-                raise ValueError(f"Shape {type(shape)} not supported")
-
-            # Close the polygon
-            coords.append(coords[0])
-        polygons.append(sg.Polygon(coords))
+        polygons.append(_chain_as_polygon(chain))
 
     return polygons
