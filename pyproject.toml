@@ -1,9 +1,9 @@
 [project]
-name = "forced-neckdown"
-version = "0.1.0"
-description = "Add your description here"
+name = "breakneck"
+version = "0.2.0"
+description = "Manual forced neckdowns for KiCad"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = [
     "kicad-python @ https://gitlab.com/kicad/code/kicad-python.git",
     "shapely>=2.0.7",

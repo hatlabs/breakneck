@@ -5,8 +5,8 @@ import shapely.geometry as sg
 from kipy.board import BoardLayer as BL
 from kipy.proto.board import board_types_pb2
 
-import kifnd.conversions
-import kifnd.footprint
+import breakneck.conversions
+import breakneck.footprint
 
 
 def get_courtyard_shapes(
@@ -25,24 +25,24 @@ def get_courtyard_polygons(
     """Get the front and back courtyard polygons of a footprint."""
 
     f_crtyd_shapes = get_courtyard_shapes(footprint, BL.BL_F_CrtYd)
-    f_polys = kifnd.conversions.as_polygons(f_crtyd_shapes, 1000)
+    f_polys = breakneck.conversions.as_polygons(f_crtyd_shapes, 1000)
     b_crtyd_shapes = get_courtyard_shapes(footprint, BL.BL_B_CrtYd)
-    b_polys = kifnd.conversions.as_polygons(b_crtyd_shapes, 1000)
+    b_polys = breakneck.conversions.as_polygons(b_crtyd_shapes, 1000)
 
     return f_polys, b_polys
 
 
 def get_all_courtyards(
     board: kipy.board.Board,
-) -> list[kifnd.footprint.FootprintCrossings,]:
+) -> list[breakneck.footprint.FootprintCrossings,]:
     """Get the front and back courtyard polygons of all footprints on a board."""
 
-    fpcs: list[kifnd.footprint.FootprintCrossings] = []
+    fpcs: list[breakneck.footprint.FootprintCrossings] = []
 
     for fp in board.get_footprints():
         f_polys, b_polys = get_courtyard_polygons(fp)
         fpcs.append(
-            kifnd.footprint.FootprintCrossings(
+            breakneck.footprint.FootprintCrossings(
                 ref=fp.reference_field.text.value,
                 footprint=fp,
                 front_courtyards=f_polys,

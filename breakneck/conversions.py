@@ -8,7 +8,7 @@ import kipy.util.units
 import numpy as np
 import shapely.geometry as sg
 
-from kifnd.base import Coords2D
+from breakneck.base import Coords2D
 
 OpenShape = kbt.BoardSegment | kbt.BoardArc
 ClosedShape = kbt.BoardRectangle | kbt.BoardCircle | kbt.BoardPolygon
