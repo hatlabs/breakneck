@@ -7,11 +7,13 @@ import kipy.board_types
 import shapely
 import shapely.geometry as sg
 from kipy.board import BoardLayer as BL
+from loguru import logger
 
 import breakneck.conversions
 import breakneck.courtyard
 import breakneck.track
 from breakneck.base import Coords2D
+from breakneck.courtyard import get_courtyard_polygons
 
 
 @dataclass
@@ -106,16 +108,16 @@ class BNFootprint:
         items_to_create = []
 
         if self.front_courtyards:
-            print("Breaking front tracks")
+            logger.debug("Breaking front tracks")
             front_tracks = [t for t in all_tracks if t.layer == BL.BL_F_Cu]
             front_track_tree = breakneck.track.TrackTree(front_tracks)
-            print("Finding bounding box hits")
+            logger.debug("Finding bounding box hits")
             front_hits = front_track_tree.bounding_box_hit(
                 self.front_courtyards, max_width
             )
             if front_hits:
                 tracks, linestrings = zip(*front_hits)
-                print("Finding crossings")
+                logger.debug("Finding crossings")
                 front_crossings = self.find_crossings(tracks, linestrings, front=True)
                 for track, points in front_crossings.items():
                     new_tracks = breakneck.track.break_track(track, points)
@@ -123,16 +125,16 @@ class BNFootprint:
                     items_to_create.extend(new_tracks)
 
         if self.back_courtyards:
-            print("Breaking back tracks")
+            logger.debug("Breaking back tracks")
             back_tracks = [t for t in all_tracks if t.layer == BL.BL_B_Cu]
             back_track_tree = breakneck.track.TrackTree(back_tracks)
-            print("Finding bounding box hits")
+            logger.debug("Finding bounding box hits")
             back_hits = back_track_tree.bounding_box_hit(
                 self.back_courtyards, max_width
             )
             if back_hits:
                 tracks, linestrings = zip(*back_hits)
-                print("Finding crossings")
+                logger.debug("Finding crossings")
                 back_crossings = self.find_crossings(tracks, linestrings, front=False)
                 for track, points in back_crossings.items():
                     new_tracks = breakneck.track.break_track(track, points)
@@ -140,3 +142,24 @@ class BNFootprint:
                     items_to_create.extend(new_tracks)
 
         return items_to_remove, items_to_create
+
+
+def get_bn_footprints(
+    footprints: Sequence[kipy.board_types.FootprintInstance],
+) -> list[BNFootprint,]:
+    """Get BNFootprint objects of all footprints on a board."""
+
+    fpcs: list[BNFootprint] = []
+
+    for fp in footprints:
+        f_polys, b_polys = get_courtyard_polygons(fp)
+        fpcs.append(
+            BNFootprint(
+                ref=fp.reference_field.text.value,
+                footprint=fp,
+                front_courtyards=f_polys,
+                back_courtyards=b_polys,
+            )
+        )
+
+    return fpcs

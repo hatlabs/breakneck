@@ -30,24 +30,3 @@ def get_courtyard_polygons(
     b_polys = breakneck.conversions.as_polygons(b_crtyd_shapes, 1000)
 
     return f_polys, b_polys
-
-
-def get_all_courtyards(
-    board: kipy.board.Board,
-) -> list[breakneck.footprint.BNFootprint,]:
-    """Get the front and back courtyard polygons of all footprints on a board."""
-
-    fpcs: list[breakneck.footprint.BNFootprint] = []
-
-    for fp in board.get_footprints():
-        f_polys, b_polys = get_courtyard_polygons(fp)
-        fpcs.append(
-            breakneck.footprint.BNFootprint(
-                ref=fp.reference_field.text.value,
-                footprint=fp,
-                front_courtyards=f_polys,
-                back_courtyards=b_polys,
-            )
-        )
-
-    return fpcs

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from enum import Enum
 
 
 @dataclass(frozen=True)
@@ -39,3 +40,9 @@ class Coords2D:
 
     def as_tuple(self):
         return self.x, self.y
+
+
+class Sides(str, Enum):
+    front = "front"
+    back = "back"
+    both = "both"
