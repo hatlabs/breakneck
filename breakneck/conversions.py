@@ -50,6 +50,7 @@ def _polyline_as_tuples(polyline: kipy.geometry.PolyLine) -> list[tuple[int, int
 
 
 def polygon_as_shapely_polygon(polygon: kipy.geometry.PolygonWithHoles) -> sg.Polygon:
+    print("converting")
     coords = _polyline_as_tuples(polygon.outline)
     holes = [_polyline_as_tuples(hole) for hole in polygon.holes]
     return sg.Polygon(coords, holes)
@@ -85,10 +86,10 @@ def board_rectangle_as_polygon(
     top_left = rectangle.top_left
     bottom_right = rectangle.bottom_right
     coords = [
-        (top_left.x, top_left.y),
-        (bottom_right.x, top_left.y),
-        (bottom_right.x, bottom_right.y),
-        (top_left.x, bottom_right.y),
+        (top_left.x, -top_left.y),
+        (bottom_right.x, -top_left.y),
+        (bottom_right.x, -bottom_right.y),
+        (top_left.x, -bottom_right.y),
     ]
     return sg.Polygon(coords)
 

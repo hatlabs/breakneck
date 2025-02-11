@@ -7,13 +7,35 @@ import kipy.board_types
 import shapely
 import shapely.geometry as sg
 from kipy.board import BoardLayer as BL
+from kipy.proto.board import board_types_pb2
 from loguru import logger
 
 import breakneck.conversions
-import breakneck.courtyard
 import breakneck.track
 from breakneck.base import Coords2D
-from breakneck.courtyard import get_courtyard_polygons
+
+
+def get_courtyard_shapes(
+    footprint: kipy.board_types.FootprintInstance,
+    layer: board_types_pb2.BoardLayer.ValueType,
+) -> list[kipy.board_types.BoardShape]:
+    """
+    Get the front or back courtyard shapes of a footprint
+    """
+    return [sh for sh in footprint.definition.shapes if sh.layer == layer]
+
+
+def get_courtyard_polygons(
+    footprint: kipy.board_types.FootprintInstance,
+) -> tuple[list[sg.Polygon], list[sg.Polygon]]:
+    """Get the front and back courtyard polygons of a footprint."""
+
+    f_crtyd_shapes = get_courtyard_shapes(footprint, BL.BL_F_CrtYd)
+    f_polys = breakneck.conversions.as_polygons(f_crtyd_shapes, 1000)
+    b_crtyd_shapes = get_courtyard_shapes(footprint, BL.BL_B_CrtYd)
+    b_polys = breakneck.conversions.as_polygons(b_crtyd_shapes, 1000)
+
+    return f_polys, b_polys
 
 
 @dataclass
@@ -119,6 +141,7 @@ class BNFootprint:
                 tracks, linestrings = zip(*front_hits)
                 logger.debug("Finding crossings")
                 front_crossings = self.find_crossings(tracks, linestrings, front=True)
+                logger.debug(f"Breaking {len(front_crossings)} tracks")
                 for track, points in front_crossings.items():
                     new_tracks = breakneck.track.break_track(track, points)
                     items_to_remove.append(track)
@@ -136,6 +159,7 @@ class BNFootprint:
                 tracks, linestrings = zip(*back_hits)
                 logger.debug("Finding crossings")
                 back_crossings = self.find_crossings(tracks, linestrings, front=False)
+                logger.debug(f"Breaking {len(back_crossings)} tracks")
                 for track, points in back_crossings.items():
                     new_tracks = breakneck.track.break_track(track, points)
                     items_to_remove.append(track)

@@ -3,6 +3,7 @@ from collections.abc import Sequence
 
 import kipy.board
 import kipy.board_types
+from kipy.board import BoardLayer as BL
 from loguru import logger
 
 import breakneck.footprint
@@ -12,6 +13,7 @@ def break_tracks(
     board: kipy.board.Board,
     footprints: Sequence[breakneck.footprint.BNFootprint],
     tracks: Sequence[kipy.board_types.Track | kipy.board_types.ArcTrack],
+    dry_run: bool = False,
 ) -> None:
     """
     Break all tracks crossing the courtyards of all footprints on a board.
@@ -46,7 +48,10 @@ def break_tracks(
     commit = board.begin_commit()
     board.remove_items(list(remove_dict.values()))
     board.create_items(list(create_dict.values()))
-    board.push_commit(commit)
+    if dry_run:
+        board.drop_commit(commit)
+    else:
+        board.push_commit(commit)
 
 
 def parse_args():
@@ -62,6 +67,13 @@ def parse_args():
     )
 
     parser.add_argument("--netclass", type=str, help="Netclass to break tracks on")
+
+    parser.add_argument(
+        "--dry-run",
+        "-n",
+        action="store_true",
+        help="Do everything else but commit the changes",
+    )
 
     return parser.parse_args()
 
@@ -81,8 +93,12 @@ def main():
     if args.selection:
         items = board.get_selection()
 
+        if len(items) == 0:
+            logger.error("No items selected")
+            return
+
         # get tracks from selection
-        tracks = [
+        sel_tracks = [
             item
             for item in items
             if isinstance(item, kipy.board_types.Track)
@@ -90,19 +106,31 @@ def main():
         ]
 
         # get footprints from selection
-        footprints = [
+        sel_footprints = [
             item
             for item in items
             if isinstance(item, kipy.board_types.FootprintInstance)
         ]
 
+        # If selection has no tracks or footprints, use all tracks and footprints
+
+        if sel_tracks:
+            tracks = sel_tracks
+        if sel_footprints:
+            footprints = sel_footprints
+
     bnfootprints = breakneck.footprint.get_bn_footprints(footprints)
 
     if args.sides:
         if args.sides == "front":
+            tracks = [t for t in tracks if t.layer == BL.BL_F_Cu]
             bnfootprints = [fpc for fpc in bnfootprints if fpc.front_courtyards]
         elif args.sides == "back":
+            tracks = [t for t in tracks if t.layer == BL.BL_B_Cu]
             bnfootprints = [fpc for fpc in bnfootprints if fpc.back_courtyards]
+        else:
+            # Ignore tracks on inner layers
+            tracks = [t for t in tracks if t.layer in (BL.BL_F_Cu, BL.BL_B_Cu)]
 
     if args.netclass:
         nets = board.get_nets(args.netclass)
@@ -125,7 +153,7 @@ def main():
         logger.warning("No footprints to break tracks on")
         return
 
-    break_tracks(board, bnfootprints, tracks)
+    break_tracks(board, bnfootprints, tracks, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

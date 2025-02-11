@@ -22,7 +22,7 @@ wheels = [
 [[package]]
 name = "breakneck"
 version = "0.2.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "kicad-python" },
     { name = "loguru" },
