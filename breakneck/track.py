@@ -94,6 +94,9 @@ def _calculate_midpoint(
     radius: float,
     clockwise: bool,
 ) -> Coords2D:
+    """
+    Calculate the midpoint of an arc
+    """
     if clockwise:
         if start_angle < end_angle:
             start_angle += 2 * math.pi
@@ -113,6 +116,9 @@ def _is_arc_clockwise(
     end: Coords2D,
     center: Coords2D,
 ) -> bool:
+    """
+    Determine if an arc is clockwise or counterclockwise
+    """
     # Calculate vectors from center to start, mid, and end points
     vector_start = (start.x - center.x, start.y - center.y)
     vector_mid = (mid.x - center.x, mid.y - center.y)
@@ -185,6 +191,9 @@ def break_arc_track(
 def break_track(
     track: kipy.board_types.Track | kipy.board_types.ArcTrack, points: list[Coords2D]
 ) -> Sequence[kipy.board_types.Track | kipy.board_types.ArcTrack]:
+    """
+    Break a track at points
+    """
     if isinstance(track, kipy.board_types.ArcTrack):
         return break_arc_track(track, points)
     else:
@@ -204,15 +213,10 @@ class TrackTree:
     def intersects(
         self, courtyard: shapely.geometry.Polygon
     ) -> list[tuple[kipy.board_types.Track | kipy.board_types.ArcTrack, sg.LineString]]:
+        """
+        Return tracks that intersect with the given courtyard
+        """
         intersect_indices = self._track_tree.query(courtyard, predicate="intersects")
         return [
             (self._tracks[i], self._track_linestrings[i]) for i in intersect_indices
         ]
-
-    def bounding_box_hit(
-        self, courtyards: list[sg.Polygon], max_track_width: int
-    ) -> list[tuple[kipy.board_types.Track | kipy.board_types.ArcTrack, sg.LineString]]:
-        bounding_box = (
-            shapely.union_all(courtyards).envelope.buffer(max_track_width).envelope
-        )
-        return self.intersects(bounding_box)  # type: ignore
