@@ -228,7 +228,7 @@ def parse_args():
         help="Do everything except commit the changes",
     )
 
-    subparsers = parser.add_subparsers(dest="command")
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
     cut_parser = subparsers.add_parser("cut", help="Add neckdowns to tracks")
 
