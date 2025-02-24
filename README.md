@@ -16,7 +16,7 @@ The screenshot below shows a design with routed signals lacking stitching vias. 
 
 ### Manual Neckdown
 
-**NB:** Some `kicad-python` bugs prevent manual neckdown from being properly used.
+**NB:** [This `kicad-python` bug](https://gitlab.com/kicad/code/kicad-python/-/issues/18) prevents manual neckdown from being properly used at the moment.
 
 Neckdown, or its inverse, fanout, refers to narrowing down of PCB tracks and their clearances when routing tracks to
 fine-pitch components such as BGAs or QFNs. KiCad does not provide a built-in feature to automatically neckdown tracks,
@@ -31,9 +31,23 @@ tracks different widths.
 
 ## Installation
 
-At the moment, you need to use KiCad 9.0-rc3 or later and install `kicad-python` manually. Instructions will be provided once KiCad 9.0 and respective `kicad-python` packages are released.
+As a prerequisite, [install uv](https://docs.astral.sh/uv/getting-started/installation/).
+
+To run breakneck without actually installing it:
+
+```
+uvx breakneck <command> [options...]
+```
+
+This actually works really fast and the only downside is that you have to type `uvx` every time. If you want to install breakneck, run:
+
+```
+uv tool install breakneck
+```
 
 ## Usage
+
+**NOTE:** If you are running breakneck with `uvx`, prepend all breakneck commands below with `uvx`.
 
 Run `breakneck -h` to see the available options.
 
@@ -45,6 +59,8 @@ It is possible to run `breakneck gndvia` repeatedly using `watch` to provide sem
 watch -n 1 breakneck gndvia
 ```
 
+**NOTE:** It turns out, every execution will bump the undo buffer, so until breakneck is made a bit smarter, it will become very difficult to undo any actual changes.
+
 Breakneck has basic support for filtering the affected tracks and components by layer, netclass or selection.
 
 ## Limitations
@@ -52,5 +68,4 @@ Breakneck has basic support for filtering the affected tracks and components by 
 - Component classes are not supported due to API limitations.
 - Grouped tracks and footprints are ignored due to API limitations. It is possible to enter a group and
   run `breakneck --selection` to process the group members.
-- Only the defined courtyard layer of a through-hole compoennt is considered. The API does not allow to
-  determine the component type.
+- Multiple ground layers are not supported in `gndvia`. If you have isolated board sections, you will have a lot of bogus lines to the closest regular GND via.
