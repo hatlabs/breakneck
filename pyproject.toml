@@ -1,6 +1,6 @@
 [project]
 name = "breakneck"
-version = "0.2.0"
+version = "0.2.1"
 description = "Stitching via visualization and manual forced neckdowns for KiCad"
 readme = "README.md"
 requires-python = ">=3.11"
