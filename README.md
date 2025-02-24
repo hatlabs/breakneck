@@ -45,6 +45,10 @@ This actually works really fast and the only downside is that you have to type `
 uv tool install breakneck
 ```
 
+## KiCad Configuration
+
+The new KiCad IPC API lets you connect to an existing KiCad instance using Inter-Process Communication (IPC). The API is not enabled by default. To enable it, open the KiCad preferences and navigate to "Plugins" and check the "Enable KiCad API" checkbox.
+
 ## Usage
 
 **NOTE:** If you are running breakneck with `uvx`, prepend all breakneck commands below with `uvx`.
