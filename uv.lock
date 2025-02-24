@@ -39,7 +39,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "kicad-python", git = "https://gitlab.com/kicad/code/kicad-python.git" },
+    { name = "kicad-python", specifier = ">=0.2.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "shapely", specifier = ">=2.0.7" },
     { name = "svgpathtools", specifier = ">=1.6.1" },
@@ -348,11 +348,16 @@ wheels = [
 
 [[package]]
 name = "kicad-python"
-version = "0.1.2+dev"
-source = { git = "https://gitlab.com/kicad/code/kicad-python.git#1550afcb1405d72a69822009b2c4c1801df32e37" }
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "protobuf" },
     { name = "pynng" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a9/9a/5a1446c4b1a0265769b90e63ab5051f78402901f02ea23f738787e638618/kicad_python-0.2.0.tar.gz", hash = "sha256:a26c545f1606525da1f8fbb7213880c3959fd741e600e4a720b99aa802963f29", size = 183121 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4d/31/827ebb0284addfe8f0c96313b3eee27bee37689d8f2100dce5a0de73ef1f/kicad_python-0.2.0-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:827e0b01e765e555deddfdf6ee47c3a1a05c885452372cafd809b9dff420119b", size = 236484 },
+    { url = "https://files.pythonhosted.org/packages/eb/19/15bb1924c560277a8f406aa0c92c100bb2b6635217ddea31195b5e429040/kicad_python-0.2.0-py3-none-any.whl", hash = "sha256:3482c9dd5228a36057ff71b6e126f44ab5f4a9d482ed4b52884757b1c5335161", size = 120793 },
 ]
 
 [[package]]

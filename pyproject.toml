@@ -1,11 +1,11 @@
 [project]
 name = "breakneck"
 version = "0.2.0"
-description = "Manual forced neckdowns for KiCad"
+description = "Stitching via visualization and manual forced neckdowns for KiCad"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "kicad-python @ https://gitlab.com/kicad/code/kicad-python.git",
+    "kicad-python >= 0.2.0",
     "loguru>=0.7.3",
     "shapely>=2.0.7",
     "svgpathtools>=1.6.1",
