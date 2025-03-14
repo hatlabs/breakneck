@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from enum import Enum
 
 import kipy.board
 import kipy.board_types
@@ -8,10 +9,9 @@ from kipy.board import BoardLayer as BL
 from kipy.proto.board import board_types_pb2
 from loguru import logger
 
-import breakneck.base
 import breakneck.conversions
 import breakneck.track
-from breakneck.base import Coords2D
+from breakneck.conversions import Coords2D
 
 
 def get_courtyard_shapes(
@@ -43,6 +43,12 @@ def get_courtyard_polygons(
     return f_poly, b_poly
 
 
+class Sides(str, Enum):
+    front = "front"
+    back = "back"
+    both = "both"
+
+
 class BNFootprint:
     def __init__(self, ref: str, footprint: kipy.board_types.FootprintInstance):
         self.ref = ref
@@ -56,23 +62,21 @@ class BNFootprint:
         ):
             self.is_tht = True
         self.nets = list(set([p.net.name for p in pads]))
-        self._buffered_courtyards: dict[
-            tuple[int, breakneck.base.Sides], sg.Polygon
-        ] = {}
+        self._buffered_courtyards: dict[tuple[int, Sides], sg.Polygon] = {}
 
     def buffer_courtyard(
         self,
         buffer_width_nm: int,
-        side: breakneck.base.Sides,
+        side: Sides,
     ) -> sg.Polygon:
         if (buffer_width_nm, side) in self._buffered_courtyards:
             return self._buffered_courtyards[(buffer_width_nm, side)]
 
-        if side == breakneck.base.Sides.front:
+        if side == Sides.front:
             courtyard = self.front_courtyard
-        elif side == breakneck.base.Sides.back:
+        elif side == Sides.back:
             courtyard = self.back_courtyard
-        elif side == breakneck.base.Sides.both:
+        elif side == Sides.both:
             courtyard = shapely.union_all([self.front_courtyard, self.back_courtyard])
             assert isinstance(courtyard, sg.Polygon)
 
@@ -173,11 +177,11 @@ class BNFootprint:
                 track, kipy.board_types.ArcTrack
             )
             if self.is_tht:
-                side = breakneck.base.Sides.both
+                side = Sides.both
             elif track.layer == BL.BL_F_Cu:
-                side = breakneck.base.Sides.front
+                side = Sides.front
             elif track.layer == BL.BL_B_Cu:
-                side = breakneck.base.Sides.back
+                side = Sides.back
             else:
                 raise ValueError(f"Unexpected track layer: {track.layer}")
 
