@@ -157,7 +157,7 @@ def execute_gndvia_check(args):
     gnd_vias = [via for via in vias if via.net.name == "GND"] + gnd_tht_pads
 
     gnd_via_coords = [
-        breakneck.conversions.vector2_as_coords(via.position) for via in gnd_vias
+        breakneck.conversions.as_coords2d(via.position) for via in gnd_vias
     ]
     gnd_via_points = [shapely.geometry.Point(coords) for coords in gnd_via_coords]
 
@@ -165,7 +165,7 @@ def execute_gndvia_check(args):
 
     non_gnd_vias = [via for via in vias if via.net.name != "GND"]
     non_gnd_via_coords = [
-        breakneck.conversions.vector2_as_coords(via.position) for via in non_gnd_vias
+        breakneck.conversions.as_coords2d(via.position) for via in non_gnd_vias
     ]
     non_gnd_via_points = [
         shapely.geometry.Point(coords) for coords in non_gnd_via_coords

@@ -1,7 +1,7 @@
 [project]
 name = "breakneck"
-version = "0.2.1"
-authors = [{ name = "Matti Airas", email = "mairas@iki.fi" }]
+version = "0.3.0"
+authors = [{ name = "Matti Airas", email = "matti.airas@hatlabs.fi" }]
 description = "Stitching via visualization and manual forced neckdowns for KiCad"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,7 +18,7 @@ keywords = ["KiCad", "EDA", "PCB", "stitching", "neckdown", "breakneck"]
 
 dependencies = [
     "kicad-python >= 0.2.0",
-    "loguru>=0.7.3",
+    "loguru>=0.7.2",
     "shapely>=2.0.7",
     "svgpathtools>=1.6.1",
 ]

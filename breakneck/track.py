@@ -12,7 +12,7 @@ import shapely.geometry as sg
 
 import breakneck.conversions
 import breakneck.footprint
-from breakneck.base import Coords2D
+from breakneck.conversions import Coords2D
 
 
 def round_track_width(width_nm: int, tol_nm=10000) -> int:
@@ -47,8 +47,8 @@ def break_track_segment(
     if not points:
         raise ValueError("No points to break track")
 
-    start = breakneck.conversions.vector2_as_coords(track.start)
-    end = breakneck.conversions.vector2_as_coords(track.end)
+    start = breakneck.conversions.as_coords2d(track.start)
+    end = breakneck.conversions.as_coords2d(track.end)
 
     current = start
 
@@ -61,8 +61,8 @@ def break_track_segment(
         )
         new_track = kipy.board_types.Track(new_track_proto)
 
-        new_track.start = breakneck.conversions.coords_as_vector2(current)
-        new_track.end = breakneck.conversions.coords_as_vector2(point)
+        new_track.start = breakneck.conversions.as_vector2(current)
+        new_track.end = breakneck.conversions.as_vector2(point)
 
         new_track.width = track.width
         new_track.net = track.net
@@ -143,12 +143,12 @@ def break_arc_track(
     if not points:
         raise ValueError("No points to break track")
 
-    start = breakneck.conversions.vector2_as_coords(track.start)
-    mid = breakneck.conversions.vector2_as_coords(track.mid)
-    end = breakneck.conversions.vector2_as_coords(track.end)
+    start = breakneck.conversions.as_coords2d(track.start)
+    mid = breakneck.conversions.as_coords2d(track.mid)
+    end = breakneck.conversions.as_coords2d(track.end)
     center_vector = track.center()
     assert center_vector is not None
-    center = breakneck.conversions.vector2_as_coords(center_vector)
+    center = breakneck.conversions.as_coords2d(center_vector)
     radius = int(track.radius())
     clockwise = _is_arc_clockwise(start, mid, end, center)
 
@@ -167,9 +167,9 @@ def break_arc_track(
         )
 
         new_track = kipy.board_types.ArcTrack(new_track_proto)
-        new_track.start = breakneck.conversions.coords_as_vector2(current)
-        new_track.mid = breakneck.conversions.coords_as_vector2(mid_point)
-        new_track.end = breakneck.conversions.coords_as_vector2(point)
+        new_track.start = breakneck.conversions.as_vector2(current)
+        new_track.mid = breakneck.conversions.as_vector2(mid_point)
+        new_track.end = breakneck.conversions.as_vector2(point)
         new_track.width = track.width
         new_track.net = track.net
         new_track.layer = track.layer
@@ -206,7 +206,7 @@ class TrackTree:
     ):
         self._tracks = list(tracks)
         self._track_linestrings = [
-            breakneck.conversions.track_as_linestring(track) for track in self._tracks
+            breakneck.conversions.as_linestring(track) for track in self._tracks
         ]
         self._track_tree = shapely.STRtree(self._track_linestrings)
 
