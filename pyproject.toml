@@ -1,7 +1,7 @@
 [project]
 name = "breakneck"
-version = "0.2.1"
-authors = [{ name = "Matti Airas", email = "mairas@iki.fi" }]
+version = "0.3.0"
+authors = [{ name = "Matti Airas", email = "matti.airas@hatlabs.fi" }]
 description = "Stitching via visualization and manual forced neckdowns for KiCad"
 readme = "README.md"
 requires-python = ">=3.11"
