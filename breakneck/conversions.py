@@ -43,8 +43,8 @@ def get_endpoints(shape: kbt.BoardShape, tol_nm: int) -> tuple[Coords2D, Coords2
 
     match shape:
         case kbt.BoardSegment() | kbt.BoardArc():
-            start = as_tol(Coords2D(shape.start.x, shape.start.y), tol_nm)
-            end = as_tol(Coords2D(shape.end.x, shape.end.y), tol_nm)
+            start = as_tol(as_coords2d(shape.start), tol_nm)
+            end = as_tol(as_coords2d(shape.end), tol_nm)
         case _:
             raise ValueError(f"Shape {type(shape)} not supported")
 
@@ -87,13 +87,13 @@ def as_linestring(
         mid = as_coords2d(arc.mid)
 
         # Calculate the center of the arc
-        arc_center = arc.center()
+        arc_center_vector = arc.center()
 
-        if arc_center is None:
+        if arc_center_vector is None:
             # Return an empty line string for degenerate arcs
             return sg.LineString([])
 
-        center = as_coords2d(arc_center)
+        center = as_coords2d(arc_center_vector)
 
         # Calculate the radius of the arc
         radius = int(arc.radius())
@@ -123,9 +123,9 @@ def as_linestring(
         # We want num_circle_points points on a full circle
 
         # Calculate the angle of the arc
-        angle = abs(end_angle - start_angle)
+        angle = end_angle - start_angle
 
-        num_points = int(num_circle_points / 360.0 * np.degrees(angle)) + 1
+        num_points = abs(int(num_circle_points / 360.0 * np.degrees(angle))) + 1
 
         angles = np.linspace(start_angle, end_angle, num_points)
 
@@ -237,7 +237,6 @@ def _reverse_shape(shape: kbt.BoardShape) -> None:
             shape.start, shape.end = shape.end, shape.start
         case kbt.BoardArc():
             shape.start, shape.end = shape.end, shape.start
-            shape.start_angle, shape.end_angle = shape.end_angle, shape.start_angle
         case _:
             raise ValueError(f"Shape {type(shape)} not supported")
 
