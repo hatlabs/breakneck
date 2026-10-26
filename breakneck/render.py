@@ -27,6 +27,8 @@ OVER_COLOUR = "#ff2a6d"
 BACKGROUND = "#101010"
 OUTLINE_COLOUR = "#888888"
 UNFIXABLE_COLOUR = "cyan"
+# Neutral, so copper no via can join reads apart from the distance scale.
+UNSTITCHABLE_COLOUR = "#a0a0a0"
 PANEL_COLUMNS = 2
 PANEL_INCHES = 8
 PANEL_DPI = 100
@@ -39,8 +41,11 @@ def _colormap() -> matplotlib.colors.Colormap:
     return cmap
 
 
-def _same(a: npt.NDArray[np.floating], b: npt.NDArray[np.floating]) -> bool:
-    return bool(np.array_equal(a, b, equal_nan=True))
+def _same(a: CoverageMap, b: CoverageMap) -> bool:
+    return bool(
+        np.array_equal(a.distance, b.distance, equal_nan=True)
+        and np.array_equal(a.unstitchable, b.unstitchable)
+    )
 
 
 def panels(maps: Sequence[CoverageMap]) -> list[tuple[CoverageMap, list[str]]]:
@@ -49,7 +54,7 @@ def panels(maps: Sequence[CoverageMap]) -> list[tuple[CoverageMap, list[str]]]:
     out: list[tuple[CoverageMap, list[str]]] = []
     for m in maps:
         twin = next(
-            (p for p in out if p[0].net == m.net and _same(p[0].distance, m.distance)),
+            (p for p in out if p[0].net == m.net and _same(p[0], m)),
             None,
         )
         if twin is None:
@@ -83,17 +88,25 @@ def render_panels(
     )
     fig.patch.set_facecolor(BACKGROUND)
     cmap = _colormap()
+    grey = matplotlib.colors.ListedColormap([UNSTITCHABLE_COLOUR])
     image = None
     for ax in axs.ravel()[len(shown) :]:
         ax.set_visible(False)
     for ax, (m, twins) in zip(axs.ravel(), shown):
         ax.set_facecolor(BACKGROUND)
+        extent = (x0, x1, y1, y0)
         image = ax.imshow(
-            np.ma.masked_invalid(m.distance),
+            np.ma.masked_where(m.unstitchable | np.isnan(m.distance), m.distance),
             cmap=cmap,
             vmin=0,
             vmax=distance,
-            extent=(x0, x1, y1, y0),
+            extent=extent,
+            interpolation="nearest",
+        )
+        ax.imshow(
+            np.ma.masked_where(~m.unstitchable, m.unstitchable),
+            cmap=grey,
+            extent=extent,
             interpolation="nearest",
         )
         for v in snapshot.vias:
@@ -131,7 +144,7 @@ def render_panels(
     cb.ax.tick_params(colors="white")
     fig.suptitle(
         "Pour stitching: filled = planned via, ring = existing via, "
-        "cyan x = no via fits",
+        "cyan x = no via fits, grey = no via can join (fill on one layer)",
         color="white",
     )
     fig.savefig(path, dpi=PANEL_DPI, facecolor=fig.get_facecolor(), bbox_inches="tight")
@@ -148,10 +161,12 @@ def overlay_rgba(maps: Sequence[CoverageMap], distance: float) -> npt.NDArray[np
     rgba = np.zeros((*shape, 4), np.uint8)
     cmap = _colormap()
     norm = matplotlib.colors.Normalize(vmin=0, vmax=distance)
+    grey = matplotlib.colors.to_rgba_array(UNSTITCHABLE_COLOUR)[0]
     for m in maps:
         inside = ~np.isnan(m.distance)
         colours = cmap(norm(np.where(inside, m.distance, 0)), bytes=True)
         rgba[inside] = colours[inside]
+        rgba[m.unstitchable] = np.round(grey * 255).astype(np.uint8)
     return rgba
 
 

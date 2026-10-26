@@ -123,7 +123,7 @@ Notes:
 
 ### Heatmaps
 
-`pourstitch --render PATH` writes a figure with one panel per net and layer, coloured by distance to the nearest stitching via, measured through the copper. Points beyond `--distance` are highlighted.
+`pourstitch --render PATH` writes a figure with one panel per net and layer, coloured by distance to the nearest stitching via, measured through the copper. Points beyond `--distance` are pink. Copper no via can ever join is grey: a fill island where the net's pour is on only one layer, such as a local zone whose other side is another net's pour. Grey areas are left out of the uncovered area that `pourstitch` logs and are reported separately.
 
 `pourstitch --overlay [DIR]` writes one transparent PNG per copper layer to DIR (default: the current directory) and places it on the board as a reference image, scaled and positioned to line up with the copper. The images go on User.1–User.4, one per copper layer in stack order, or on the layers given with `--overlay-layers`. Those layers must be enabled in Board Setup → Board Editor Layers. Toggle a layer's visibility to show or hide its heatmap, and remove them with `breakneck clear`.
 

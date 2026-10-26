@@ -58,9 +58,15 @@ def _log_coverage(
 ) -> None:
     counts = stitcher.stitch_counts(snapshot, options)
     for c in summarise(maps, options.distance, grid.pixel):
+        unstitchable = (
+            f"; {c.unstitchable_mm2:.2f} mm² can't be stitched (fill on one layer)"
+            if c.unstitchable_mm2
+            else ""
+        )
         logger.info(
             f"  {c.net} on {c.layer}: {c.uncovered_mm2:.2f} mm² ({c.uncovered_pixels} px) "
             f"beyond {options.distance:g} mm; {counts[c.net]} existing stitches"
+            + unstitchable
         )
 
 

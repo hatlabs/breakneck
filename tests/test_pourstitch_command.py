@@ -206,3 +206,37 @@ def test_planned_run_leaves_uncovered_spots_unmarked(fakes):
     )
 
     assert [s.mark_unfixable for s in placements] == [False]
+
+
+ISLAND = box(12, 2, 16, 6)
+ISLAND_MM2 = 16.0
+
+
+def test_check_reports_unstitchable_copper_apart_from_uncovered(
+    fakes, log, monkeypatch
+):
+    # A GND local zone on F.Cu only, beside the two-layer pour: no via can
+    # join it, so it is not counted as uncovered.
+    snap = Snapshot(
+        copper_layers=LAYERS,
+        zones=[
+            Zone("GND", LAYERS, 0, POUR, {L: POUR for L in LAYERS}),
+            Zone("GND", ("F.Cu",), 0, ISLAND, {"F.Cu": ISLAND}),
+        ],
+        edge_paths=[[(x, y) for x, y in box(0, 0, 20, 10).exterior.coords]],
+        via_sizes={"GND": ViaSize(0.6, 0.3)},
+    )
+    monkeypatch.setattr(Snapshot, "from_board", staticmethod(lambda board: snap))
+
+    pourstitch_command.execute(
+        OPTIONS,
+        pourstitch_command.Outputs(),
+        check=True,
+        kicad=KiCad(Board()),  # type: ignore[arg-type]
+    )
+
+    (front,) = [line for line in log if "GND on F.Cu" in line]
+    assert f"{POUR_MM2:.2f} mm²" in front
+    assert f"{ISLAND_MM2:.2f} mm² can't be stitched" in front
+    (back,) = [line for line in log if "GND on B.Cu" in line]
+    assert "can't be stitched" not in back

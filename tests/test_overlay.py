@@ -15,6 +15,12 @@ from breakneck.snapshot import Snapshot, ViaSize
 D = 2.5
 
 
+def coverage(net, layer, dist, unstitchable=None):
+    if unstitchable is None:
+        unstitchable = np.zeros(dist.shape, bool)
+    return CoverageMap(net, layer, dist, unstitchable)
+
+
 def test_placement_maps_pixel_zero_to_raster_origin():
     origin, size, pixel = (12.3, -4.5), (200, 80), 0.1
 
@@ -49,7 +55,7 @@ def test_layer_map_follows_stack_order():
 
 def maps_for(layer_nets: dict[str, list[tuple[str, np.ndarray]]]) -> list[CoverageMap]:
     return [
-        CoverageMap(net, layer, dist)
+        coverage(net, layer, dist)
         for layer, entries in layer_nets.items()
         for net, dist in entries
     ]
@@ -74,6 +80,30 @@ def test_overlay_image_has_raster_size_and_transparent_background(tmp_path: Path
     assert tuple(rgba[0, 40, :3]) == (0xFF, 0x2A, 0x6D)
 
 
+def test_unstitchable_copper_is_grey_not_pink(tmp_path: Path):
+    dist = np.full((10, 10), np.inf)
+    unstitchable = np.zeros(dist.shape, bool)
+    unstitchable[:, 5:] = True
+    maps = [coverage("GND", "F.Cu", dist, unstitchable)]
+
+    rgba = np.asarray(Image.open(render.write_overlays(tmp_path, maps, D)["F.Cu"]))
+
+    assert tuple(rgba[0, 0, :3]) == (0xFF, 0x2A, 0x6D)
+    grey = render.matplotlib.colors.to_rgb(render.UNSTITCHABLE_COLOUR)
+    assert tuple(rgba[0, 9, :3]) == tuple(round(c * 255) for c in grey)
+    assert rgba[0, 9, 3] == 255
+
+
+def test_layers_differing_only_in_unstitchable_copper_get_own_panels():
+    a = np.array([[np.inf, np.inf]])
+    maps = [
+        coverage("GND", "F.Cu", a),
+        coverage("GND", "B.Cu", a.copy(), np.array([[False, True]])),
+    ]
+
+    assert len(render.panels(maps)) == 2
+
+
 def test_one_overlay_per_copper_layer(tmp_path: Path):
     a = np.zeros((4, 4))
     maps = maps_for({"In1.Cu": [("GND", a)], "In2.Cu": [("GND", a)]})
@@ -84,9 +114,9 @@ def test_one_overlay_per_copper_layer(tmp_path: Path):
 def test_identical_layers_share_a_panel():
     a = np.array([[1.0, np.nan]])
     maps = [
-        CoverageMap("GND", "In1.Cu", a),
-        CoverageMap("GND", "In2.Cu", a.copy()),
-        CoverageMap("GND", "F.Cu", np.array([[2.0, np.nan]])),
+        coverage("GND", "In1.Cu", a),
+        coverage("GND", "In2.Cu", a.copy()),
+        coverage("GND", "F.Cu", np.array([[2.0, np.nan]])),
     ]
 
     shown = render.panels(maps)
@@ -110,7 +140,11 @@ def test_render_panels_writes_png(tmp_path: Path):
     )
     out = tmp_path / "heat.png"
 
-    render.render_panels(out, snap, grid, [CoverageMap("GND", "F.Cu", dist)], plan, D)
+    unstitchable = np.zeros(dist.shape, bool)
+    unstitchable[:, 25:] = True
+    maps = [coverage("GND", "F.Cu", dist, unstitchable)]
+
+    render.render_panels(out, snap, grid, maps, plan, D)
 
     assert Image.open(out).size[0] > 0
 

@@ -11,6 +11,7 @@ from breakneck.pourstitch import (
     Options,
     PourStitcher,
     lattice_sites,
+    summarise,
 )
 from breakneck.snapshot import Pad, PadKind, Snapshot, Via, ViaSize, Zone
 
@@ -269,3 +270,61 @@ def test_other_net_outer_pour_pulls_back_around_new_vias():
 
     assert plan.units
     assert max_uncovered(stitcher, snap, options(), plan.units) <= D
+
+
+# ---- copper no stitch can join -------------------------------------------------
+
+PIXEL_MM2 = 0.01
+
+
+def front_only_snapshot(front_only, joined=True):
+    """A two-layer GND pour plus F.Cu-only GND copper.
+
+    With `joined`, the F.Cu-only part touches the two-layer pour's F.Cu fill;
+    otherwise it is an island of its own, like a local zone beside an
+    inductor whose B.Cu side is another net's pour.
+    """
+    both = box(0, 0, 10, 10)
+    zones = [
+        Zone(NET, TWO_LAYERS, 0, both, {L: both for L in TWO_LAYERS}),
+        Zone(NET, ("F.Cu",), 0, front_only, {"F.Cu": front_only}),
+    ]
+    return Snapshot(
+        copper_layers=TWO_LAYERS,
+        zones=zones,
+        edge_paths=outline_paths(box(0, 0, 20, 10)),
+        via_sizes={NET: VIA},
+    )
+
+
+def front_map(stitcher, snap, units=()):
+    (m,) = [m for m in stitcher.coverage(snap, options(), units) if m.layer == "F.Cu"]
+    return m
+
+
+def test_front_only_island_is_unstitchable_not_uncovered():
+    island = box(12, 2, 16, 6)
+    snap = front_only_snapshot(island)
+    stitcher = PourStitcher()
+    plan = stitcher(snap, options(), [])
+
+    m = front_map(stitcher, snap, plan.units)
+
+    grid = stitcher.grid(snap, options())
+    assert m.unstitchable[grid.index((14, 4))]
+    assert not m.unstitchable[grid.index((5, 5))]
+    assert m.unstitchable.sum() * PIXEL_MM2 == pytest.approx(island.area, rel=0.05)
+    (front,) = [c for c in summarise([m], D, grid.pixel) if c.layer == "F.Cu"]
+    assert front.uncovered_pixels == 0
+    assert front.unstitchable_mm2 == pytest.approx(island.area, rel=0.05)
+    assert not [s for s in plan.unfixable if island.contains(Point(s.position))]
+
+
+def test_front_only_copper_joined_to_a_stitchable_pour_stays_stitchable():
+    # A via in the two-layer part still reaches the F.Cu-only finger.
+    snap = front_only_snapshot(box(10, 4, 12, 6))
+    stitcher = PourStitcher()
+
+    m = front_map(stitcher, snap)
+
+    assert not m.unstitchable.any()

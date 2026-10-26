@@ -55,6 +55,8 @@ THERMAL_REACH = 0.4
 LATTICE_WINDOW = 0.6
 # A new via only shortens distances near it; bounding the update keeps it fast.
 UPDATE_REACH_FACTOR = 3
+# Fill islands are 8-connected, as the geodesic distance moves diagonally.
+ISLAND_CONNECTIVITY = np.ones((3, 3), bool)
 UNREACHABLE = 1e6
 FAR = 1e9
 COORD_DECIMALS = 3
@@ -173,6 +175,13 @@ class Grid:
         return _edt(mask) * np.float32(self.pixel)
 
 
+def _islands(mask: BoolMap) -> npt.NDArray[np.int32]:
+    """Label each 8-connected island of True pixels; 0 elsewhere."""
+    labelled = ndimage.label(mask, structure=ISLAND_CONNECTIVITY)
+    assert isinstance(labelled, tuple)
+    return np.asarray(labelled[0], np.int32)
+
+
 def _edt(mask: BoolMap) -> FloatMap:
     """Pixel distance from each True pixel to the nearest False pixel."""
     return np.asarray(ndimage.distance_transform_edt(mask), dtype=np.float32)
@@ -203,12 +212,18 @@ def via_sizes(snapshot: Snapshot, options: Options, net: str) -> tuple[ViaSize, 
 class CoverageMap:
     """Distance (mm) through `net`'s fill on `layer` to the nearest stitch.
 
-    NaN outside the fill, inf where no stitch reaches.
+    NaN outside the fill, inf where no stitch reaches. `unstitchable` marks
+    fill no via could ever join (see `_Context.unstitchable`).
     """
 
     net: str
     layer: str
     distance: FloatMap
+    unstitchable: BoolMap
+
+    def uncovered(self, distance: float) -> BoolMap:
+        """Stitchable fill farther than `distance` from a stitch."""
+        return (self.distance > distance) & ~self.unstitchable
 
 
 class _Context:
@@ -250,6 +265,41 @@ class _Context:
             self._edge, self._keepout, self._hole = self._board_clearances()
         for net in self.nets:
             self.feasible.update(self._feasible(net))
+
+    @cached_property
+    def unstitchable(self) -> dict[tuple[str, str], BoolMap]:
+        """Fill per net and layer that no stitch can ever join.
+
+        Judged per fill island, not per pixel: an island is stitchable if any
+        pixel of it passes the zone-layer rule (the net's zone outlines cover
+        two or more layers there, all filled) or an existing stitch touches
+        it. A via anywhere in the island reaches all of it through the
+        copper, so per-pixel judgement would grey out stitchable edges. A
+        typical unstitchable island is a local zone on one layer whose other
+        side is another net's pour.
+        """
+        out = {}
+        for net in self.nets:
+            joinable = self._joinable(net)
+            seeds = self.stitch_seeds(net)
+            for L in self.layers[net]:
+                fill = self.fill[(net, L)]
+                islands = _islands(fill)
+                touched = np.array([islands[px] for px in seeds[L]], islands.dtype)
+                reached = np.union1d(islands[joinable], touched)
+                out[(net, L)] = fill & ~np.isin(islands, reached)
+        return out
+
+    def _joinable(self, net: str) -> BoolMap:
+        """Pixels where a via of `net` passes the zone-layer rule."""
+        n_required = np.zeros(self.grid.shape, np.int8)
+        filled = np.ones(self.grid.shape, bool)
+        for L in self.snapshot.copper_layers:
+            outline = self.outline[(net, L)]
+            n_required += outline
+            fill = self.fill.get((net, L))
+            filled &= ~outline if fill is None else ~outline | fill
+        return filled & (n_required >= MIN_STITCH_LAYERS)
 
     def outline_layers(self, net: str, px: Pixel) -> list[str]:
         return [L for L in self.snapshot.copper_layers if self.outline[(net, L)][px]]
@@ -500,7 +550,9 @@ class _NetRun:
 
     def greedy(self) -> int:
         ctx, d = self.ctx, self.ctx.options.distance
-        unfixable = {L: np.zeros(ctx.grid.shape, bool) for L in self.dist}
+        # No via can reach unstitchable copper; searching it would only add
+        # spurious unfixable spots.
+        unfixable = {L: ctx.unstitchable[(self.net, L)].copy() for L in self.dist}
         placed = 0
         while (worst := self._worst(unfixable)) is not None:
             layer, px = worst
@@ -536,9 +588,18 @@ class _NetRun:
         return None
 
     def uncovered_mm2(self) -> float:
-        d, px = self.ctx.options.distance, self.ctx.grid.pixel
+        ctx = self.ctx
+        d, px = ctx.options.distance, ctx.grid.pixel
         return sum(
-            float(np.sum(self.ctx.fill[(self.net, L)] & (dist > d))) * px * px
+            float(
+                np.sum(
+                    ctx.fill[(self.net, L)]
+                    & (dist > d)
+                    & ~ctx.unstitchable[(self.net, L)]
+                )
+            )
+            * px
+            * px
             for L, dist in self.dist.items()
         )
 
@@ -594,7 +655,12 @@ class PourStitcher:
             for L in ctx.layers[net]:
                 dist = ctx.geodesic(net, L, seeds[L])
                 maps.append(
-                    CoverageMap(net, L, np.where(ctx.fill[(net, L)], dist, np.nan))
+                    CoverageMap(
+                        net,
+                        L,
+                        np.where(ctx.fill[(net, L)], dist, np.nan),
+                        ctx.unstitchable[(net, L)],
+                    )
                 )
         return maps
 
@@ -613,14 +679,18 @@ class LayerCoverage:
     layer: str
     uncovered_pixels: int
     uncovered_mm2: float
+    unstitchable_mm2: float
 
 
 def summarise(
     maps: Sequence[CoverageMap], distance: float, pixel: float
 ) -> list[LayerCoverage]:
-    """Fill area per net and layer farther than `distance` from a stitch."""
+    """Stitchable fill area per net and layer farther than `distance` from a
+    stitch, and the fill area no stitch can join."""
     out = []
+    area = pixel * pixel
     for m in maps:
-        n = int(np.sum(m.distance > distance))
-        out.append(LayerCoverage(m.net, m.layer, n, n * pixel * pixel))
+        n = int(np.sum(m.uncovered(distance)))
+        unstitchable = int(np.sum(m.unstitchable)) * area
+        out.append(LayerCoverage(m.net, m.layer, n, n * area, unstitchable))
     return out
