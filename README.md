@@ -96,7 +96,7 @@ Each placement run:
 1. Refills the zones, so the planner sees current fills.
 2. Plans the vias from a snapshot of the board.
 3. Checks the plan with `kicad-cli pcb drc` on a temporary copy of the board, against a DRC run on an unmodified copy. Vias implicated in new violations are dropped, and the planner tries again without those spots, for up to five rounds.
-4. Commits the remaining vias, their stubs and any markers as one undo step, then refills the zones.
+4. Commits the remaining vias, their stubs and any markers as one undo step, then refills the zones. If the board was edited in KiCad while the run was going, nothing is committed and the run has to be repeated.
 
 Spots that need attention get markers on User.Eco2:
 

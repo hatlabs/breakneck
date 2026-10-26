@@ -36,6 +36,10 @@ class SplitError(RuntimeError):
     """New connectivity violations that no planned via could be blamed for."""
 
 
+class BoardChangedError(RuntimeError):
+    """The board differs from the copy DRC verified."""
+
+
 @dataclass(frozen=True)
 class RunResult:
     snapshot: Snapshot
@@ -117,8 +121,9 @@ def run_placement(
         logger.warning("Zone refill not confirmed; fills in the snapshot may be stale")
     snapshot = Snapshot.from_board(board)
 
+    verified_text = board.get_as_string()
     with tempfile.TemporaryDirectory(prefix="breakneck-drc-") as tmp:
-        runner = drc.DrcRunner(kicad_cli, project, board.get_as_string(), Path(tmp))
+        runner = drc.DrcRunner(kicad_cli, project, verified_text, Path(tmp))
         result = drc.prune(
             planner,
             snapshot,
@@ -139,6 +144,9 @@ def run_placement(
         logger.info("Nothing to commit")
         return RunResult(snapshot, result)
 
+    # DRC can take minutes; an edit made meanwhile was never verified.
+    if board.get_as_string() != verified_text:
+        raise BoardChangedError("The board changed during the run; run again")
     commit_units(kicad, board, settings.command, result.plan.units, markers)
     return RunResult(snapshot, result)
 

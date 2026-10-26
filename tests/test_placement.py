@@ -66,6 +66,8 @@ class RecordingBoard:
         self.project_dir = project_dir
         self.created = []
         self.client = FakeClient(self)
+        # Successive get_as_string results; the last one repeats.
+        self.texts = ["(kicad_pcb)"]
 
     def __getattr__(self, attr):
         def record(*args, **kwargs):
@@ -75,6 +77,9 @@ class RecordingBoard:
 
     def get_nets(self):
         return [net("GND"), net("+3.3V")]
+
+    def get_as_string(self):
+        return self.texts.pop(0) if len(self.texts) > 1 else self.texts[0]
 
     def get_layer_by_name(self, name):
         return {"F.Cu": BL.BL_F_Cu, "B.Cu": BL.BL_B_Cu}[name]
@@ -247,6 +252,18 @@ def test_empty_plan_without_markers_commits_nothing(saved_board):
     )
 
     assert "begin_commit" not in board.calls and pushes(board) == []
+
+
+def test_board_edited_during_the_run_is_not_committed(saved_board):
+    board, kicad = saved_board
+    board.texts = ["(kicad_pcb)", "(kicad_pcb (edited))"]
+
+    with pytest.raises(placement.BoardChangedError, match="run again"):
+        placement.run_placement(
+            plan_at((1, 1)), None, placement.RunSettings("test"), kicad
+        )
+
+    assert "begin_commit" not in board.calls and board.created == []
 
 
 def split_runner(violation_type):

@@ -13,7 +13,12 @@ import breakneck.overlay
 from breakneck.commit import Marker, MarkerKind, eco2_segment, marker_items
 from breakneck.overlay import DEFAULT_OVERLAY_LAYERS
 from breakneck.padvia import PadviaOptions, plan_padvia
-from breakneck.placement import RunSettings, SplitError, run_placement
+from breakneck.placement import (
+    BoardChangedError,
+    RunSettings,
+    SplitError,
+    run_placement,
+)
 from breakneck.plan import POURSTITCH_DISTANCE, POURSTITCH_FALLBACK_VIA
 from breakneck.returnvia import (
     DEFAULT_DISTANCE,
@@ -183,6 +188,10 @@ def execute_gndvia_check(args):
         board.push_commit(commit)
 
 
+# Placement failures that leave the board untouched and need no traceback.
+PLACEMENT_ERRORS = (SplitError, BoardChangedError)
+
+
 @contextmanager
 def _exit_on(*errors: type[Exception]) -> Iterator[None]:
     """Report an expected failure as one log line and exit 1."""
@@ -292,7 +301,7 @@ def execute_returnvia(args):
         kicad_cli=args.kicad_cli,
         allow_splits=args.allow_splits,
     )
-    with _exit_on(NoGroundNetsError, SplitError):
+    with _exit_on(NoGroundNetsError, *PLACEMENT_ERRORS):
         run_placement(plan_return_vias, options, settings)
 
 
@@ -436,7 +445,7 @@ def execute_padvia(args):
         kicad_cli=args.kicad_cli,
         allow_splits=args.allow_splits,
     )
-    with _exit_on(SplitError):
+    with _exit_on(*PLACEMENT_ERRORS):
         run_placement(plan_padvia, options, settings)
 
 
@@ -460,7 +469,7 @@ def execute_pourstitch(args):
         overlay_dir=args.overlay,
         overlay_layers=tuple(args.overlay_layers),
     )
-    with _exit_on(pourstitch_command.OverlayLayersError, SplitError):
+    with _exit_on(pourstitch_command.OverlayLayersError, *PLACEMENT_ERRORS):
         pourstitch_command.execute(
             options,
             outputs,
