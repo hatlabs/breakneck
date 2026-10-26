@@ -18,6 +18,7 @@ from breakneck.plan import (
 )
 from breakneck.returnvia import (
     NoGroundNetsError,
+    ReferencePlane,
     ReturnViaOptions,
     plan_return_vias,
     resolve_ground_nets,
@@ -694,7 +695,7 @@ def test_track_touching_the_via_edge_on_connects():
     assert connected(snap) == ["F.Cu", "B.Cu"]
 
 
-# Copper on B.Cu (or a pour on In2) near the via that must not count.
+# Copper that must not add a layer to the via's F.Cu track.
 MISSES = {
     "track-short-of-the-disc": {
         "tracks": [track("SIG", "B.Cu", (15, 10), (10.45, 10))]
@@ -742,3 +743,102 @@ def test_ground_and_netless_vias_are_not_considered(net):
     )
 
     assert references(snap) == []
+
+
+def through_via(zones=None, ground_nets=GROUNDS):
+    """The plane per connected layer of a via with tracks on F.Cu and B.Cu."""
+    snap = snapshot(
+        vias=[via("SIG", *SIG_AT)], tracks=[front_track(), back_track()], zones=zones
+    )
+    (r,) = via_references(snap, ground_nets)
+    return r
+
+
+def planes_by_layer(r):
+    return {c.layer: c.plane for c in r.layers}
+
+
+def test_each_end_of_a_through_via_references_the_nearest_ground_plane():
+    r = through_via(ground_nets=None)
+
+    assert planes_by_layer(r) == {
+        "F.Cu": ReferencePlane("In1.Cu", "GND"),
+        "B.Cu": ReferencePlane("In2.Cu", "GND"),
+    }
+    assert not r.exempt
+    assert len(r.planes) == 2
+
+
+def test_layer_whose_ground_outline_misses_the_via_is_skipped():
+    r = through_via(
+        zones=[
+            zone("GND", ["In1.Cu"], box(30, 0, 40, 20)),
+            zone("GND", ["In2.Cu"], GND_AREA),
+        ]
+    )
+
+    assert planes_by_layer(r)["F.Cu"] == ReferencePlane("In2.Cu", "GND")
+
+
+def test_plane_takes_the_ground_net_of_its_own_zone():
+    r = through_via(
+        zones=[
+            zone("GND_ISO", ["In1.Cu"], box(5, 5, 15, 15)),
+            zone("GND", ["In2.Cu"], GND_AREA),
+        ]
+    )
+
+    assert planes_by_layer(r) == {
+        "F.Cu": ReferencePlane("In1.Cu", "GND_ISO"),
+        "B.Cu": ReferencePlane("In2.Cu", "GND"),
+    }
+
+
+def test_overlapping_ground_outlines_resolve_to_the_highest_priority():
+    r = through_via(
+        zones=[
+            zone("GND", INNER, GND_AREA),
+            zone("GND_ISO", ["In1.Cu"], box(5, 5, 15, 15), priority=1),
+        ]
+    )
+
+    assert planes_by_layer(r)["F.Cu"] == ReferencePlane("In1.Cu", "GND_ISO")
+
+
+def test_two_ends_on_the_same_plane_are_one_measurement():
+    r = through_via(
+        zones=[
+            zone("GND", ["In1.Cu"], GND_AREA),
+            zone("GND", ["In2.Cu"], box(30, 0, 40, 20)),
+        ]
+    )
+
+    assert planes_by_layer(r) == {
+        "F.Cu": ReferencePlane("In1.Cu", "GND"),
+        "B.Cu": ReferencePlane("In1.Cu", "GND"),
+    }
+    assert r.planes == (ReferencePlane("In1.Cu", "GND"),)
+
+
+def test_end_with_no_ground_on_any_other_layer_is_outside_ground():
+    r = through_via(
+        zones=[zone("GND", ["F.Cu"], GND_AREA)],
+        ground_nets=["GND"],
+    )
+
+    assert planes_by_layer(r) == {
+        "F.Cu": None,
+        "B.Cu": ReferencePlane("F.Cu", "GND"),
+    }
+    assert r.planes == (ReferencePlane("F.Cu", "GND"),)
+
+
+def test_inner_layer_equidistant_from_two_planes_takes_the_upper_one():
+    snap = snapshot(
+        vias=[via("SIG", *SIG_AT)],
+        tracks=[track("SIG", "In1.Cu", (5, 10), SIG_AT), back_track()],
+        zones=[zone("GND", ["F.Cu", "In2.Cu"], GND_AREA)],
+    )
+
+    (r,) = via_references(snap, ["GND"])
+    assert planes_by_layer(r)["In1.Cu"] == ReferencePlane("F.Cu", "GND")

@@ -202,11 +202,41 @@ def via_references(
     return [
         ViaReferences(
             v,
-            tuple(LayerReference(L, None) for L in _connected_layers(snapshot, v)),
+            tuple(
+                LayerReference(L, _reference_plane(snapshot, v.position, L, grounds))
+                for L in _connected_layers(snapshot, v)
+            ),
         )
         for v in sorted(snapshot.vias, key=lambda v: v.position)
         if v.net and v.net not in grounds
     ]
+
+
+def _reference_plane(
+    snapshot: Snapshot, position: Point2, layer: str, grounds: Sequence[str]
+) -> ReferencePlane | None:
+    """Nearest other layer in stack order with a ground outline at `position`.
+
+    Equidistant layers resolve to the upper one; overlapping outlines on the
+    plane resolve to the highest zone priority, as in `ground_net_at`.
+    """
+    stack = snapshot.copper_layers
+    i = stack.index(layer)
+    pt = Point(position)
+    for step in range(1, len(stack)):
+        for j in (i - step, i + step):
+            if not 0 <= j < len(stack):
+                continue
+            hits = [
+                z
+                for z in snapshot.copper_zones
+                if z.net in grounds and stack[j] in z.layers and z.outline.contains(pt)
+            ]
+            if hits:
+                plane = max(hits, key=lambda z: z.priority)
+                assert plane.net is not None
+                return ReferencePlane(stack[j], plane.net)
+    return None
 
 
 def _connected_layers(snapshot: Snapshot, v: Via) -> list[str]:
