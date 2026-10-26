@@ -688,3 +688,33 @@ def test_board_without_project_file_is_refused(tmp_path):
 
     with pytest.raises(drc.ProjectFilesError):
         drc.project_files(FakeProjectBoard(str(tmp_path), "b.kicad_pcb"))
+
+
+def parsed(*violations):
+    return drc.parse_report(report(violations))
+
+
+def test_violation_nets_come_from_the_item_tags():
+    (v,) = parsed(
+        violation(
+            "unconnected_items",
+            item("Pad 1 [+3V3] of U1", 0, 0),
+            item("Zone [GND]", 1, 1),
+        )
+    )
+    (untagged,) = parsed(violation("isolated_copper", item("Zone", 0, 0)))
+
+    assert drc.violation_nets(v) == {"+3V3", "GND"}
+    assert drc.violation_nets(untagged) == {drc.UNNAMED_NET}
+
+
+def test_connectivity_nets_rise_only_with_their_count():
+    a, moved, gnd, clearance = parsed(
+        violation("unconnected_items", item("Pad 1 [+3V3] of U1", 1, 1)),
+        violation("unconnected_items", item("Pad 2 [+3V3] of U2", 5, 5)),
+        violation("isolated_copper", item("Zone [GND] on F.Cu", 3, 3)),
+        violation("clearance", item("Via [VCC]", 0, 0)),
+    )
+
+    assert drc.rising_connectivity_nets([a], [moved, clearance]) == set()
+    assert drc.rising_connectivity_nets([a], [a, moved, gnd]) == {"+3V3", "GND"}

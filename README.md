@@ -104,7 +104,7 @@ Spots that need attention get markers on User.Eco2:
 - a + at a forced via (`returnvia --force`);
 - a square at a new DRC violation that couldn't be pinned on a single via.
 
-Other nets' pours are not obstacles, so a single via can cut a narrow neck of another net's pour. DRC reports that as unconnected items or isolated copper and names the pour's pads or zones, not the via. When a run finds such a new violation it commits nothing and exits with an error listing the violations. `--allow-splits` (on `returnvia`, `padvia` and `pourstitch`) commits anyway, with a square marker at each violation for fixing by hand. A dry run lists them without failing.
+Other nets' pours are not obstacles, so a single via can cut a narrow neck of another net's pour. DRC reports that as unconnected items or isolated copper and names the pour's pads or zones, not the via. breakneck counts these violations per net, in DRC of the board as it is and with the planned vias added. When a net's count goes up, the run commits nothing and exits with an error naming the net and listing the violations. An existing violation that DRC reports at different items after the refill leaves the count unchanged, so it gets a marker but doesn't stop the run. `--allow-splits` (on `returnvia`, `padvia` and `pourstitch`) commits anyway, with a square marker at each violation for fixing by hand. A dry run lists them without failing.
 
 `pourstitch` doesn't mark uncovered spots; its heatmap shows them as areas. `breakneck clear` removes the markers.
 

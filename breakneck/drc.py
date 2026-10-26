@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import uuid
@@ -46,6 +47,10 @@ CLEARANCE_TYPES = frozenset(
 # A via that splits another net's pour shows up as these, naming the pour's
 # pads or zones but not the via.
 CONNECTIVITY_TYPES = frozenset({"unconnected_items", "isolated_copper"})
+# DRC item descriptions name the item's net in brackets: "Pad 1 [GND] of J1".
+NET_TAG = re.compile(r"\[(.*)\]")
+# Connectivity violations naming no net are counted together under this.
+UNNAMED_NET = "(unnamed)"
 STARVED_THERMAL = "starved_thermal"
 THROUGH_VIA_LAYERS = ("F.Cu", "B.Cu")
 FONTS_MARKER = "\n\t(embedded_fonts"
@@ -279,6 +284,33 @@ def new_violations(
     return out
 
 
+def violation_nets(v: Violation) -> frozenset[str]:
+    """Nets named in the items' descriptions, or UNNAMED_NET if none is."""
+    nets = frozenset(
+        m.group(1) for i in v.items if (m := NET_TAG.search(i.description))
+    )
+    return nets or frozenset({UNNAMED_NET})
+
+
+def connectivity_by_net(violations: Iterable[Violation]) -> Counter[str]:
+    return Counter(
+        n for v in violations if v.type in CONNECTIVITY_TYPES for n in violation_nets(v)
+    )
+
+
+def rising_connectivity_nets(
+    baseline: Iterable[Violation], planned: Iterable[Violation]
+) -> set[str]:
+    """Nets with more connectivity violations in `planned` than in `baseline`.
+
+    Counting per net, not matching by position, keeps an existing unconnected
+    item whose reported anchors move after a refill from looking new.
+    """
+    before = connectivity_by_net(baseline)
+    after = connectivity_by_net(planned)
+    return {n for n, c in after.items() if c > before[n]}
+
+
 class DrcRunner:
     """Runs kicad-cli DRC on copies of the board in a scratch directory."""
 
@@ -294,6 +326,8 @@ class DrcRunner:
         self._board_text = board_text
         self._workdir = workdir
         self._baseline: list[Violation] | None = None
+        # The full report of the latest planned run.
+        self.planned: list[Violation] = []
 
     def _run(self, stem: str, board_text: str) -> list[Violation]:
         pcb = self._workdir / f"{stem}.kicad_pcb"
@@ -335,8 +369,8 @@ class DrcRunner:
     def new_violations(self, plan: Plan) -> list[Violation]:
         base = self.baseline()
         logger.info(f"Running DRC with {len(plan.units)} planned vias")
-        planned = self._run("planned", inject(self._board_text, plan.units))
-        return new_violations(base, planned)
+        self.planned = self._run("planned", inject(self._board_text, plan.units))
+        return new_violations(base, self.planned)
 
 
 # ---- attribution -----------------------------------------------------------------

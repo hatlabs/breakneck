@@ -168,19 +168,36 @@ def test_unsaved_board_fails_before_any_board_change(tmp_path):
 
 
 class FakeDrcRunner:
-    """Reports a clearance violation on every planned via at a bad position."""
+    """Reports a clearance violation on every planned via at a bad position,
+    on top of the `base` report."""
+
+    base: tuple[drc.Violation, ...] = ()
 
     def __init__(self, kicad_cli, project, board_text, workdir):
         self.bad = {(5, 5)}
+        self.planned: list[drc.Violation] = []
+
+    def baseline(self):
+        return list(self.base)
+
+    def report(self, plan):
+        return [
+            *self.base,
+            *(
+                drc.Violation(
+                    "clearance",
+                    "c",
+                    "error",
+                    (drc.ViolationItem("Via [GND]", u.position),),
+                )
+                for u in plan.units
+                if u.position in self.bad
+            ),
+        ]
 
     def new_violations(self, plan):
-        return [
-            drc.Violation(
-                "clearance", "c", "error", (drc.ViolationItem("Via [GND]", u.position),)
-            )
-            for u in plan.units
-            if u.position in self.bad
-        ]
+        self.planned = self.report(plan)
+        return drc.new_violations(self.base, self.planned)
 
 
 def plan_at(*positions, unfixable=()):
@@ -271,7 +288,7 @@ def split_runner(violation_type):
     """A DRC runner reporting a connectivity violation no planned via is named in."""
 
     class SplitRunner(FakeDrcRunner):
-        def new_violations(self, plan):
+        def report(self, plan):
             return [
                 drc.Violation(
                     violation_type,
@@ -334,6 +351,60 @@ def test_unattributed_non_connectivity_violation_still_commits(
     placement.run_placement(plan_at((1, 1)), None, placement.RunSettings("test"), kicad)
 
     assert len(pushes(board)) == 1
+
+
+def unconnected(*pads):
+    return drc.Violation(
+        "unconnected_items",
+        "Missing connection",
+        "error",
+        tuple(drc.ViolationItem(f"Pad {n} [+3V3] of U1", pos) for n, pos in pads),
+    )
+
+
+BASE_UNCONNECTED = unconnected(("A", (1, 2)), ("B", (3, 4)))
+
+
+def reporting(base, planned):
+    class ReportRunner(FakeDrcRunner):
+        def report(self, plan):
+            return list(planned)
+
+    ReportRunner.base = tuple(base)
+    return ReportRunner
+
+
+def test_existing_unconnected_item_that_moved_is_not_a_split(saved_board, monkeypatch):
+    # A refill around the new vias re-anchors an existing unconnected item:
+    # same net, same count, different items and positions.
+    moved = unconnected(("C", (7, 8)), ("D", (9, 10)))
+    monkeypatch.setattr(drc, "DrcRunner", reporting([BASE_UNCONNECTED], [moved]))
+    board, kicad = saved_board
+
+    result = placement.run_placement(
+        plan_at((1, 1)), None, placement.RunSettings("test"), kicad
+    )
+
+    assert result.prune.unattributed == (moved,)
+    assert len(pushes(board)) == 1
+    assert placement.markers_for(result.prune) == (
+        Marker((7, 8), MarkerKind.UNATTRIBUTED),
+    )
+
+
+def test_second_unconnected_item_on_the_same_net_is_a_split(saved_board, monkeypatch):
+    extra = unconnected(("C", (7, 8)), ("D", (9, 10)))
+    monkeypatch.setattr(
+        drc, "DrcRunner", reporting([BASE_UNCONNECTED], [BASE_UNCONNECTED, extra])
+    )
+    board, kicad = saved_board
+
+    with pytest.raises(placement.SplitError, match=r"\+3V3"):
+        placement.run_placement(
+            plan_at((1, 1)), None, placement.RunSettings("test"), kicad
+        )
+
+    assert "begin_commit" not in board.calls
 
 
 # ---- commit ------------------------------------------------------------------------

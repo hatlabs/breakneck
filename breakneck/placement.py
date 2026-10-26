@@ -135,7 +135,7 @@ def run_placement(
 
     log_summary(settings.command, result, settings.mark_unfixable)
     markers = markers_for(result, settings.mark_unfixable)
-    _check_splits(result, settings)
+    _check_splits(result, settings, runner)
 
     if settings.dry_run:
         logger.info("Dry run: nothing committed")
@@ -151,21 +151,36 @@ def run_placement(
     return RunResult(snapshot, result)
 
 
-def _check_splits(result: drc.PruneResult, settings: RunSettings) -> None:
+def _check_splits(
+    result: drc.PruneResult, settings: RunSettings, runner: drc.DrcRunner
+) -> None:
     """Refuse to commit a plan that disconnects copper, unless allowed.
 
     Other nets' pours are not obstacles, so one via can cut a narrow neck
     of a pour. DRC then names the pour's pads or zones, never the via, and
-    the prune loop can't drop it.
+    the prune loop can't drop it. A split is a net with more connectivity
+    violations than in the baseline; one that only moved is not.
     """
-    splits = [v for v in result.unattributed if v.type in drc.CONNECTIVITY_TYPES]
+    connectivity = [v for v in result.unattributed if v.type in drc.CONNECTIVITY_TYPES]
+    if not connectivity:
+        return
+    rising = drc.rising_connectivity_nets(runner.baseline(), runner.planned)
+    splits = [v for v in connectivity if drc.violation_nets(v) & rising]
+    for v in connectivity:
+        if v in splits:
+            logger.error(f"  connectivity: {v}")
+        else:
+            logger.info(
+                f"  connectivity violation moved, count on its net unchanged: {v}"
+            )
     if not splits:
         return
-    for v in splits:
-        logger.error(f"  connectivity: {v}")
+    nets = ", ".join(
+        sorted({n for v in splits for n in drc.violation_nets(v)} & rising)
+    )
     message = (
-        f"{len(splits)} new connectivity violations not pinned on a planned via; "
-        "a via may split another net's pour"
+        f"{len(splits)} new connectivity violations on {nets} not pinned on a "
+        "planned via; a via may split another net's pour"
     )
     if settings.dry_run:
         logger.error(f"{message}; a real run would refuse to commit")
