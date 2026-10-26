@@ -1,5 +1,6 @@
 import argparse
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 
 import kipy.board
@@ -16,6 +17,7 @@ from breakneck.placement import RunSettings, run_placement
 from breakneck.plan import POURSTITCH_DISTANCE, POURSTITCH_FALLBACK_VIA
 from breakneck.returnvia import (
     DEFAULT_DISTANCE,
+    NoGroundNetsError,
     ReturnViaOptions,
     plan_return_vias,
     return_lines,
@@ -157,7 +159,8 @@ def execute_gndvia_check(args):
     board = kicad.get_board()
     snapshot = Snapshot.from_board(board)
 
-    lines, unmarked = return_lines(snapshot, args.ground_nets, args.distance)
+    with _exit_on(NoGroundNetsError):
+        lines, unmarked = return_lines(snapshot, args.ground_nets, args.distance)
     logger.info(
         f"{len(lines) + len(unmarked)} vias without a return within "
         f"{args.distance} mm ({len(unmarked)} without a ground or any return)"
@@ -178,6 +181,16 @@ def execute_gndvia_check(args):
         board.drop_commit(commit)
     else:
         board.push_commit(commit)
+
+
+@contextmanager
+def _exit_on(*errors: type[Exception]) -> Iterator[None]:
+    """Report an expected failure as one log line and exit 1."""
+    try:
+        yield
+    except errors as e:
+        logger.error(str(e))
+        raise SystemExit(1) from None
 
 
 def parse_via_size(text: str) -> ViaSize:
@@ -251,7 +264,8 @@ def _add_ground_nets_argument(parser: argparse.ArgumentParser) -> None:
         "--ground-nets",
         nargs="+",
         metavar="NET",
-        help="Ground nets (default: nets with zones on two or more inner layers)",
+        help="Ground nets (default: nets with zones on two or more inner layers, "
+        "else GND)",
     )
 
 
@@ -265,7 +279,8 @@ def execute_returnvia(args):
     settings = RunSettings(
         command="returnvia", dry_run=args.dry_run, kicad_cli=args.kicad_cli
     )
-    run_placement(plan_return_vias, options, settings)
+    with _exit_on(NoGroundNetsError):
+        run_placement(plan_return_vias, options, settings)
 
 
 def parse_args():

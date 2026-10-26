@@ -14,6 +14,8 @@ A signal changing layers through a via also changes its reference plane, and its
 
 Boards with isolated sections are supported: the ground net is chosen per via from the ground zones on the inner layers, so a via in a GND_ISO section gets a GND_ISO return. A via outside every ground zone is reported, not served.
 
+The ground nets are the nets with zones on two or more inner layers. A board with no such net, such as a two-layer board or a stackup with one inner ground plane, uses the net named GND. Without a GND net, `returnvia` and `gndvia` stop before changing anything and ask for `--ground-nets`. Vias on ground nets never need a return.
+
 ![Stitching Vias](https://github.com/hatlabs/breakneck/blob/main/stitching-via-screenshot.png?raw=true)
 
 The screenshot shows `gndvia` output: yellow lines from signal vias that lack a ground via within the distance.

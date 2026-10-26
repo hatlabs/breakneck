@@ -17,8 +17,10 @@ from breakneck.plan import (
     SAME_NET_PAD_GAP,
 )
 from breakneck.returnvia import (
+    NoGroundNetsError,
     ReturnViaOptions,
     plan_return_vias,
+    resolve_ground_nets,
     return_lines,
     unserved_vias,
 )
@@ -453,6 +455,90 @@ def test_gndvia_marks_vias_without_a_ground_or_a_return():
     lines, markers = return_lines(snap, None, 1.5)
     assert lines == []
     assert sorted(markers) == [(10, 10), (35, 10)]
+
+
+TWO_LAYERS = ("F.Cu", "B.Cu")
+
+
+def two_layer_snapshot(vias=(), zones=()):
+    edge = [[(0, 0), (BOARD_W, 0), (BOARD_W, BOARD_H), (0, BOARD_H), (0, 0)]]
+    return Snapshot(
+        copper_layers=TWO_LAYERS, vias=list(vias), zones=list(zones), edge_paths=edge
+    )
+
+
+def test_two_layer_board_falls_back_to_the_net_named_gnd():
+    snap = two_layer_snapshot(
+        vias=[via("GND", 5, 5), via("SIG", 5.8, 5), via("FAR", 15, 15)],
+        zones=[zone("GND", TWO_LAYERS, GND_AREA)],
+    )
+
+    assert resolve_ground_nets(snap, None) == ["GND"]
+    assert [u.net for u in unserved_vias(snap, None, 1.5)] == ["FAR"]
+    (u,) = plan(snap).units
+    assert u.net == "GND"
+
+
+def test_gnd_with_only_vias_still_counts_as_the_ground():
+    snap = two_layer_snapshot(vias=[via("GND", 5, 5), via("SIG", 5.8, 5)])
+
+    assert resolve_ground_nets(snap, None) == ["GND"]
+
+
+@pytest.mark.parametrize("ground_nets", [None, ["GND"]])
+def test_ground_vias_are_never_unserved(ground_nets):
+    snap = snapshot(vias=[via("GND", 10, 10), via("GND", 30, 10)])
+
+    assert unserved_vias(snap, ground_nets, 1.5) == []
+
+
+def test_no_ground_net_found_is_an_error():
+    snap = two_layer_snapshot(
+        vias=[via("SIG", 5, 5)], zones=[zone("PWR", TWO_LAYERS, GND_AREA)]
+    )
+
+    with pytest.raises(NoGroundNetsError, match="--ground-nets"):
+        resolve_ground_nets(snap, None)
+    with pytest.raises(NoGroundNetsError):
+        plan(snap)
+
+
+def test_gndvia_without_a_ground_exits_before_any_board_change(monkeypatch):
+    board = _RecordingBoard([])
+    snap = two_layer_snapshot(vias=[via("SIG", 5, 5)])
+    monkeypatch.setattr(
+        cli.kipy, "KiCad", lambda: type("K", (), {"get_board": lambda self: board})()
+    )
+    monkeypatch.setattr(cli.Snapshot, "from_board", staticmethod(lambda b: snap))
+
+    args = argparse.Namespace(distance=1.5, ground_nets=None, dry_run=False)
+    with pytest.raises(SystemExit) as exit_info:
+        cli.execute_gndvia_check(args)
+
+    assert exit_info.value.code == 1
+    assert board.calls == []
+
+
+def test_returnvia_without_a_ground_exits_with_an_error(monkeypatch):
+    snap = two_layer_snapshot(vias=[via("SIG", 5, 5)])
+    monkeypatch.setattr(
+        cli,
+        "run_placement",
+        lambda planner, options, settings: planner(snap, options, []),
+    )
+    args = argparse.Namespace(
+        distance=1.5,
+        ground_nets=None,
+        via=None,
+        force=False,
+        dry_run=False,
+        kicad_cli=None,
+    )
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.execute_returnvia(args)
+
+    assert exit_info.value.code == 1
 
 
 def _parse(monkeypatch, *argv):

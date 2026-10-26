@@ -38,6 +38,7 @@ from breakneck.snapshot import (
 )
 
 DEFAULT_DISTANCE = 1.5
+FALLBACK_GROUND = "GND"
 # Candidate rings around each unserved via.
 RING_STEP = 0.05
 RING_ANGLES = 36
@@ -71,13 +72,39 @@ class Unserved:
     nearest_return: Point2 | None
 
 
+class NoGroundNetsError(ValueError):
+    pass
+
+
 def resolve_ground_nets(
     snapshot: Snapshot, ground_nets: Iterable[str] | None
 ) -> list[str]:
-    grounds = sorted(ground_nets) if ground_nets else snapshot.default_ground_nets()
-    if not grounds:
-        logger.warning("No ground nets: no net has zones on two inner layers")
-    return grounds
+    """The given ground nets, else the detected ones, else the net named GND.
+
+    Detection needs zones on two inner layers, which two-layer boards and
+    single-plane stackups never have; their ground is the net named GND.
+    """
+    if ground_nets:
+        return sorted(ground_nets)
+    grounds = snapshot.default_ground_nets()
+    if grounds:
+        return grounds
+    if _has_copper(snapshot, FALLBACK_GROUND):
+        logger.info(
+            f"No net has zones on two inner layers; using {FALLBACK_GROUND} as ground"
+        )
+        return [FALLBACK_GROUND]
+    raise NoGroundNetsError(
+        f"No ground net found: no net has zones on two inner layers and there is "
+        f"no {FALLBACK_GROUND} net; name the ground nets with --ground-nets"
+    )
+
+
+def _has_copper(snapshot: Snapshot, net: str) -> bool:
+    return any(
+        item.net == net
+        for item in (*snapshot.copper_zones, *snapshot.vias, *snapshot.pads)
+    )
 
 
 def _returns(snapshot: Snapshot, grounds: Iterable[str]) -> dict[str, list[Point2]]:
