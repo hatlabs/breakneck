@@ -1,12 +1,15 @@
 import argparse
 import sys
+from pathlib import Path
 
 import pytest
 from loguru import logger
 
 import breakneck
-from breakneck import cli, placement, pourstitch_command
+from breakneck import cli, overlay, placement, pourstitch_command, returnvia_command
 from breakneck.cli import parse_via_size
+from breakneck.returnpath import NoBoardOutlineError
+from breakneck.returnvia import NoGroundNetsError
 from breakneck.snapshot import ViaSize
 
 
@@ -55,22 +58,15 @@ def parsed(monkeypatch, argv):
     return cli.parse_args()
 
 
-@pytest.mark.parametrize(
-    "argv, execute",
-    [
-        (["returnvia"], cli.execute_returnvia),
-        (["padvia", "--nets", "GND"], cli.execute_padvia),
-    ],
-)
 @pytest.mark.parametrize("allow", [False, True])
-def test_allow_splits_reaches_the_run_settings(monkeypatch, argv, execute, allow):
+def test_allow_splits_reaches_the_run_settings(monkeypatch, allow):
     seen: list[placement.RunSettings] = []
     monkeypatch.setattr(
         cli, "run_placement", lambda planner, options, settings: seen.append(settings)
     )
     flag = ["--allow-splits"] if allow else []
 
-    execute(parsed(monkeypatch, [*argv, *flag]))
+    cli.execute_padvia(parsed(monkeypatch, ["padvia", "--nets", "GND", *flag]))
 
     assert [s.allow_splits for s in seen] == [allow]
 
@@ -79,28 +75,117 @@ class Captured(Exception):
     pass
 
 
+@pytest.mark.parametrize(
+    "argv, module",
+    [
+        (["pourstitch", "--nets", "GND"], pourstitch_command),
+        (["returnvia"], returnvia_command),
+    ],
+)
 @pytest.mark.parametrize("allow", [False, True])
-def test_pourstitch_allow_splits_reaches_the_run_settings(monkeypatch, allow):
+def test_heatmap_command_allow_splits_reaches_the_run_settings(
+    monkeypatch, argv, module, allow
+):
     seen: list[placement.RunSettings] = []
 
     def capture(planner, options, settings, kicad):
         seen.append(settings)
         raise Captured
 
-    monkeypatch.setattr(pourstitch_command, "run_placement", capture)
+    monkeypatch.setattr(module, "run_placement", capture)
     monkeypatch.setattr(
-        pourstitch_command.kipy,
+        module.kipy,
         "KiCad",
         lambda: type("K", (), {"get_board": lambda self: None})(),
     )
+    monkeypatch.setattr(returnvia_command, "check_outline", lambda board: None)
     flag = ["--allow-splits"] if allow else []
 
     with pytest.raises(Captured):
-        cli.execute_pourstitch(
-            parsed(monkeypatch, ["pourstitch", "--nets", "GND", *flag])
-        )
+        getattr(cli, f"execute_{argv[0]}")(parsed(monkeypatch, [*argv, *flag]))
 
     assert [s.allow_splits for s in seen] == [allow]
+
+
+def test_returnvia_takes_the_heatmap_options(monkeypatch, tmp_path):
+    seen = []
+    monkeypatch.setattr(
+        returnvia_command,
+        "execute",
+        lambda options, outputs, **kw: seen.append((options, outputs, kw)),
+    )
+    argv = [
+        "returnvia",
+        "--check",
+        "--render",
+        str(tmp_path / "heat.png"),
+        "--overlay",
+        "--overlay-layers",
+        "User.5",
+        "User.6",
+        "User.7",
+        "User.8",
+        "--distance",
+        "2",
+    ]
+
+    cli.execute_returnvia(parsed(monkeypatch, argv))
+
+    ((options, outputs, kw),) = seen
+    assert options.distance == 2
+    assert outputs == overlay.Outputs(
+        render=tmp_path / "heat.png",
+        overlay_dir=Path("."),
+        overlay_layers=("User.5", "User.6", "User.7", "User.8"),
+    )
+    assert kw["check"]
+
+
+@pytest.mark.parametrize(
+    "argv, dry_run, kicad_cli",
+    [
+        (["returnvia"], False, None),
+        (
+            ["--dry-run", "returnvia", "--kicad-cli", "/opt/kicad-cli"],
+            True,
+            "/opt/kicad-cli",
+        ),
+    ],
+)
+def test_returnvia_passes_dry_run_and_kicad_cli_through(
+    monkeypatch, argv, dry_run, kicad_cli
+):
+    seen = []
+    monkeypatch.setattr(
+        returnvia_command, "execute", lambda options, outputs, **kw: seen.append(kw)
+    )
+
+    cli.execute_returnvia(parsed(monkeypatch, argv))
+
+    (kw,) = seen
+    assert kw["dry_run"] is dry_run
+    assert kw["kicad_cli"] == kicad_cli
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        NoBoardOutlineError("no outline"),
+        NoGroundNetsError("no ground"),
+        overlay.OverlayLayersError("layers"),
+        placement.SplitError("split"),
+    ],
+)
+def test_returnvia_failure_exits_cleanly(monkeypatch, error):
+    def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(returnvia_command, "execute", fail)
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.execute_returnvia(parsed(monkeypatch, ["returnvia", "--check"]))
+
+    assert exit_info.value.code == 1
 
 
 @pytest.mark.parametrize(

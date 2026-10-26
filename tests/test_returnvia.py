@@ -8,7 +8,7 @@ import pytest
 from kipy.proto.board.board_types_pb2 import BoardLayer
 from shapely.geometry import LineString, Point, box
 
-from breakneck import cli
+from breakneck import cli, returnvia_command
 from breakneck.plan import (
     EDGE_GAP,
     FORBIDDEN_RADIUS,
@@ -539,22 +539,19 @@ def test_gndvia_without_a_ground_exits_before_any_board_change(monkeypatch):
 def test_returnvia_without_a_ground_exits_with_an_error(monkeypatch):
     snap = two_layer_snapshot(vias=[via("SIG", 5, 5)])
     monkeypatch.setattr(
-        cli,
+        returnvia_command,
         "run_placement",
-        lambda planner, options, settings: planner(snap, options, []),
+        lambda planner, options, settings, kicad: planner(snap, options, []),
     )
-    args = argparse.Namespace(
-        distance=1.5,
-        ground_nets=None,
-        via=None,
-        force=False,
-        dry_run=False,
-        kicad_cli=None,
-        allow_splits=False,
+    monkeypatch.setattr(returnvia_command, "check_outline", lambda board: None)
+    monkeypatch.setattr(
+        returnvia_command.kipy,
+        "KiCad",
+        lambda: type("K", (), {"get_board": lambda self: None})(),
     )
 
     with pytest.raises(SystemExit) as exit_info:
-        cli.execute_returnvia(args)
+        cli.execute_returnvia(_parse(monkeypatch, "returnvia"))
 
     assert exit_info.value.code == 1
 

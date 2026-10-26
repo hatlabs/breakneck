@@ -1,5 +1,4 @@
 import argparse
-import importlib
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -25,7 +24,6 @@ from breakneck.returnvia import (
     DEFAULT_DISTANCE,
     NoGroundNetsError,
     ReturnViaOptions,
-    plan_return_vias,
     return_lines,
 )
 from breakneck.snapshot import (
@@ -259,15 +257,17 @@ def add_pourstitch_parser(subparsers) -> None:
         metavar="DIAMETER/DRILL",
         help="Smaller via size in mm for spots the netclass size doesn't fit",
     )
-    p.add_argument(
-        "--check",
-        action="store_true",
-        help="Only measure the existing stitching; place no vias",
-    )
-    p.add_argument(
+    _add_heatmap_arguments(p, "Only measure the existing stitching; place no vias")
+    p.add_argument("--kicad-cli", metavar="PATH", help="kicad-cli binary used for DRC")
+    _add_allow_splits_argument(p)
+
+
+def _add_heatmap_arguments(parser: argparse.ArgumentParser, check_help: str) -> None:
+    parser.add_argument("--check", action="store_true", help=check_help)
+    parser.add_argument(
         "--render", type=Path, metavar="PATH", help="Write the heatmap panels to PATH"
     )
-    p.add_argument(
+    parser.add_argument(
         "--overlay",
         nargs="?",
         type=Path,
@@ -276,15 +276,13 @@ def add_pourstitch_parser(subparsers) -> None:
         help="Write per-layer heatmap PNGs to DIR (default: .) and place them "
         "on the board as reference images",
     )
-    p.add_argument(
+    parser.add_argument(
         "--overlay-layers",
         nargs="+",
         metavar="LAYER",
         default=list(DEFAULT_OVERLAY_LAYERS),
         help="User layers for the overlays, one per copper layer in stack order",
     )
-    p.add_argument("--kicad-cli", metavar="PATH", help="kicad-cli binary used for DRC")
-    _add_allow_splits_argument(p)
 
 
 def _add_allow_splits_argument(parser: argparse.ArgumentParser) -> None:
@@ -307,23 +305,34 @@ def _add_ground_nets_argument(parser: argparse.ArgumentParser) -> None:
 
 
 def execute_returnvia(args):
-    # The return metric needs the place extra; fail before touching the board.
     with _needs_place_extra():
-        importlib.import_module("breakneck.returnpath")
+        from breakneck import returnpath, returnvia_command
+
     options = ReturnViaOptions(
         distance=args.distance,
         ground_nets=tuple(args.ground_nets) if args.ground_nets else None,
         via=args.via,
         force=args.force,
     )
-    settings = RunSettings(
-        command="returnvia",
-        dry_run=args.dry_run,
-        kicad_cli=args.kicad_cli,
-        allow_splits=args.allow_splits,
+    outputs = breakneck.overlay.Outputs(
+        render=args.render,
+        overlay_dir=args.overlay,
+        overlay_layers=tuple(args.overlay_layers),
     )
-    with _exit_on(NoGroundNetsError, *PLACEMENT_ERRORS):
-        run_placement(plan_return_vias, options, settings)
+    with _exit_on(
+        returnpath.NoBoardOutlineError,
+        NoGroundNetsError,
+        breakneck.overlay.OverlayLayersError,
+        *PLACEMENT_ERRORS,
+    ):
+        returnvia_command.execute(
+            options,
+            outputs,
+            dry_run=args.dry_run,
+            check=args.check,
+            kicad_cli=args.kicad_cli,
+            allow_splits=args.allow_splits,
+        )
 
 
 def parse_args():
@@ -429,6 +438,9 @@ def parse_args():
         "--force",
         action="store_true",
         help="Place best-effort vias where none fits with full clearance",
+    )
+    _add_heatmap_arguments(
+        returnvia_parser, "Only measure the existing returns; place no vias"
     )
     returnvia_parser.add_argument(
         "--kicad-cli", metavar="PATH", help="kicad-cli binary used for DRC"
