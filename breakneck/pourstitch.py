@@ -30,7 +30,9 @@ from breakneck.plan import (
     OTHER_NET_CLEARANCE,
     POURSTITCH_DISTANCE,
     POURSTITCH_FALLBACK_VIA,
+    QUANTISATION,
     SAME_NET_PAD_GAP,
+    THERMAL_REACH,
     Plan,
     PlannedUnit,
     UnfixableSpot,
@@ -49,12 +51,8 @@ from breakneck.raster import (
 )
 from breakneck.snapshot import MIN_STITCH_LAYERS, PadKind, Point2, Snapshot, ViaSize
 
-# Every clearance gets one pixel of margin for the rasterisation error.
-QUANTISATION = 0.1
 VIA_SPACING = 0.9
 IN_FILL_MARGIN = 0.05
-# Thermal spokes let an existing stitch reach fill a little beyond its copper.
-THERMAL_REACH = 0.4
 LATTICE_WINDOW = 0.6
 # A new via only shortens distances near it; bounding the update keeps it fast.
 UPDATE_REACH_FACTOR = 3
