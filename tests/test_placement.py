@@ -14,8 +14,8 @@ from kipy.proto.common.types import DocumentSpecifier
 
 from breakneck import commit, drc, placement
 from breakneck.commit import Marker, MarkerKind
-from breakneck.plan import Plan, PlannedUnit, Stub
-from breakneck.snapshot import ViaSize
+from breakneck.plan import Plan, PlannedUnit, Stub, UnfixableSpot
+from breakneck.snapshot import Snapshot, ViaSize
 
 VIA = ViaSize(0.6, 0.3)
 BOARD_CHANGES = {
@@ -158,6 +158,97 @@ def test_unsaved_board_fails_before_any_board_change(tmp_path):
     assert board_changes(board) == []
 
 
+# ---- run ------------------------------------------------------------------------
+
+
+class FakeDrcRunner:
+    """Reports a clearance violation on every planned via at a bad position."""
+
+    def __init__(self, kicad_cli, project, board_text, workdir):
+        self.bad = {(5, 5)}
+
+    def new_violations(self, plan):
+        return [
+            drc.Violation(
+                "clearance", "c", "error", (drc.ViolationItem("Via [GND]", u.position),)
+            )
+            for u in plan.units
+            if u.position in self.bad
+        ]
+
+
+def plan_at(*positions, unfixable=()):
+    def planner(snapshot, options, forbidden):
+        return Plan(
+            units=tuple(unit(*p) for p in positions if p not in forbidden),
+            unfixable=unfixable,
+        )
+
+    return planner
+
+
+@pytest.fixture
+def saved_board(tmp_path, monkeypatch):
+    """A RecordingBoard saved to disk, with kicad-cli and DRC faked."""
+    cli = tmp_path / "kicad-cli"
+    cli.write_text("#!/bin/sh\necho 10.0.7\n")
+    cli.chmod(0o755)
+    (tmp_path / "b.kicad_pcb").write_text("")
+    (tmp_path / "b.kicad_pro").write_text("{}")
+    monkeypatch.setattr(
+        placement.Snapshot,
+        "from_board",
+        staticmethod(lambda board: Snapshot(copper_layers=("F.Cu", "B.Cu"))),
+    )
+    monkeypatch.setattr(drc, "DrcRunner", FakeDrcRunner)
+    board = RecordingBoard(project_dir=str(tmp_path))
+    return board, FakeKiCad(board, str(cli))
+
+
+def pushes(board):
+    return [c for c in board.calls if isinstance(c, tuple) and c[0] == "push_commit"]
+
+
+def test_run_commits_the_pruned_units_in_one_commit(saved_board):
+    board, kicad = saved_board
+
+    result = placement.run_placement(
+        plan_at((1, 1), (5, 5)), None, placement.RunSettings("test"), kicad
+    )
+
+    assert [u.position for u in result.prune.plan.units] == [(1, 1)]
+    assert [d.unit.position for d in result.prune.dropped] == [(5, 5)]
+    assert board.calls.count("begin_commit") == 1 and len(pushes(board)) == 1
+    (placed,) = board.created
+    assert [(v.position.x, v.position.y) for v in placed] == [(1_000_000, 1_000_000)]
+
+
+def test_dry_run_commits_nothing(saved_board):
+    board, kicad = saved_board
+
+    result = placement.run_placement(
+        plan_at((1, 1)), None, placement.RunSettings("test", dry_run=True), kicad
+    )
+
+    assert [u.position for u in result.prune.plan.units] == [(1, 1)]
+    assert "begin_commit" not in board.calls and pushes(board) == []
+    assert board.created == []
+
+
+def test_empty_plan_without_markers_commits_nothing(saved_board):
+    board, kicad = saved_board
+    unfixable = (UnfixableSpot((3, 3), "GND", "no room"),)
+
+    placement.run_placement(
+        plan_at(unfixable=unfixable),
+        None,
+        placement.RunSettings("test", mark_unfixable=False),
+        kicad,
+    )
+
+    assert "begin_commit" not in board.calls and pushes(board) == []
+
+
 # ---- commit ------------------------------------------------------------------------
 
 
@@ -230,7 +321,6 @@ def test_marker_glyphs_are_centred_on_the_spot(kind, segments):
 
 def test_markers_for_unfixable_forced_and_unattributed():
     forced = PlannedUnit((2, 2), "GND", VIA, forced=True)
-    from breakneck.plan import UnfixableSpot
 
     result = drc.PruneResult(
         plan=Plan(
