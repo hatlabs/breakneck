@@ -388,6 +388,26 @@ def test_via_outside_second_zone_outline_is_unfixable():
 # ---- prune loop and repeat runs ------------------------------------------------------
 
 
+def test_via_avoids_a_via_keepout_rule_area():
+    fp, pads = r0402()
+    nearest = plan_padvia(snapshot(pads, footprints=[fp]), GND, []).units[0]
+    keepout = Point(nearest.position).buffer(0.4)
+    rule_area = Zone(
+        net=None,
+        layers=FOUR_LAYERS,
+        priority=0,
+        outline=keepout,
+        is_rule_area=True,
+        keepout_vias=True,
+    )
+    zones = [zone("GND", ("F.Cu", "B.Cu")), rule_area]
+
+    plan = plan_padvia(snapshot(pads, zones=zones, footprints=[fp]), GND, [])
+
+    (u,) = plan.units
+    assert not Point(u.position).buffer(VIA.diameter / 2).intersects(keepout)
+
+
 def test_forbidden_position_is_not_reused():
     fp, pads = r0402()
     snap = snapshot(pads, footprints=[fp])

@@ -193,6 +193,45 @@ def test_one_return_via_serves_several_nearby_signal_vias():
     assert len(result.units) == 1
 
 
+def via_keepout(outline):
+    return Zone(
+        net=None,
+        layers=FOUR_LAYERS,
+        priority=0,
+        outline=outline,
+        is_rule_area=True,
+        keepout_vias=True,
+    )
+
+
+def test_return_via_avoids_a_via_keepout_rule_area():
+    grounds = [zone("GND", INNER, GND_AREA), zone("GND_ISO", INNER, ISO_AREA)]
+    (nearest,) = plan(snapshot(vias=[via("SIG", 10, 10)], zones=grounds)).units
+    keepout = Point(nearest.position).buffer(0.4)
+
+    snap = snapshot(vias=[via("SIG", 10, 10)], zones=[*grounds, via_keepout(keepout)])
+    (u,) = plan(snap).units
+
+    assert not disk(u.position).intersects(keepout)
+
+
+def test_return_vias_of_different_grounds_keep_clearance_from_each_other():
+    # Signal vias either side of the boundary between the two grounds, whose
+    # fills are strips along it, so both returns land near the boundary.
+    strips = {"GND": box(19.1, 0, 20, 20), "GND_ISO": box(20, 0, 20.9, 20)}
+    grounds = [
+        zone(net, INNER, area, fills=dict.fromkeys(INNER, strips[net]))
+        for net, area in (("GND", GND_AREA), ("GND_ISO", ISO_AREA))
+    ]
+    vias = [via("A", 19.2, 10), via("B", 20.8, 10)]
+    result = plan(snapshot(vias=vias, zones=grounds))
+
+    gnd, iso = sorted(result.units, key=lambda u: u.net)
+    assert (gnd.net, iso.net) == ("GND", "GND_ISO")
+    gap = disk(gnd.position).distance(disk(iso.position))
+    assert gap >= OTHER_NET_CLEARANCE - EPS
+
+
 def test_forbidden_position_is_not_reused():
     snap = snapshot(vias=[via("SIG", 10, 10)])
     (first,) = plan(snap).units
