@@ -4,19 +4,26 @@ from pathlib import Path
 
 import kipy.board
 import kipy.board_types
-import shapely.geometry
 from kipy.board import BoardLayer as BL
+from kipy.geometry import Vector2
 from kipy.proto.board import board_types_pb2
 from kipy.proto.common import base_types_pb2
 from loguru import logger
 
-import breakneck.conversions
 import breakneck.footprint
 import breakneck.overlay
+from breakneck.commit import Marker, MarkerKind, marker_items
 from breakneck.overlay import DEFAULT_OVERLAY_LAYERS
 from breakneck.placement import RunSettings, run_placement
-from breakneck.returnvia import DEFAULT_DISTANCE, ReturnViaOptions, plan_return_vias
-from breakneck.snapshot import ViaSize
+from breakneck.returnvia import (
+    DEFAULT_DISTANCE,
+    ReturnViaOptions,
+    plan_return_vias,
+    return_lines,
+)
+from breakneck.snapshot import NM_PER_MM, Point2, Snapshot, ViaSize
+
+GNDVIA_LINE_WIDTH = 0.1
 
 
 def break_tracks(
@@ -144,80 +151,51 @@ def execute_cut(args):
     break_tracks(board, bnfootprints, tracks, dry_run=args.dry_run)
 
 
-def execute_gndvia_check(args):
-    max_distance = args.distance * 1000000  # mm to nm
+def _nm_vector(p: Point2) -> Vector2:
+    return Vector2.from_xy(round(p[0] * NM_PER_MM), round(p[1] * NM_PER_MM))
 
+
+def _eco2_line(start: Point2, end: Point2) -> kipy.board_types.BoardSegment:
+    shape = base_types_pb2.GraphicShape(
+        segment=base_types_pb2.GraphicSegmentAttributes(
+            start=_nm_vector(start).proto, end=_nm_vector(end).proto
+        )
+    )
+    segment = kipy.board_types.BoardSegment(
+        proto=board_types_pb2.BoardGraphicShape(shape=shape)
+    )
+    segment.layer = BL.BL_Eco2_User
+    segment.attributes.stroke.width = round(GNDVIA_LINE_WIDTH * NM_PER_MM)
+    return segment
+
+
+def execute_gndvia_check(args):
+    """Draw a User.Eco2 line from each via lacking a return to its nearest one.
+
+    Vias outside every ground zone, or whose ground has no return at all,
+    get a marker instead.
+    """
     kicad = kipy.KiCad()
     board = kicad.get_board()
+    snapshot = Snapshot.from_board(board)
 
-    vias = board.get_vias()
+    lines, unmarked = return_lines(snapshot, args.ground_nets, args.distance)
+    logger.info(
+        f"{len(lines) + len(unmarked)} vias without a return within "
+        f"{args.distance} mm ({len(unmarked)} without a ground or any return)"
+    )
+    items = [_eco2_line(a, b) for a, b in lines] + marker_items(
+        [Marker(p, MarkerKind.UNFIXABLE) for p in unmarked]
+    )
 
-    all_pads = board.get_pads()
-    gnd_tht_pads = [
-        pad
-        for pad in all_pads
-        if pad.net.name == "GND" and pad.proto.type == kipy.board_types.PadType.PT_PTH
+    eco2_shapes = [
+        shape for shape in board.get_shapes() if shape.layer == BL.BL_Eco2_User
     ]
-
-    # We treat GND THT pads as vias as well
-    gnd_vias = [via for via in vias if via.net.name == "GND"] + gnd_tht_pads
-
-    gnd_via_coords = [
-        breakneck.conversions.as_coords2d(via.position) for via in gnd_vias
-    ]
-    gnd_via_points = [shapely.geometry.Point(coords) for coords in gnd_via_coords]
-
-    gnd_via_tree = shapely.STRtree(gnd_via_points)
-
-    non_gnd_vias = [via for via in vias if via.net.name != "GND"]
-    non_gnd_via_coords = [
-        breakneck.conversions.as_coords2d(via.position) for via in non_gnd_vias
-    ]
-    non_gnd_via_points = [
-        shapely.geometry.Point(coords) for coords in non_gnd_via_coords
-    ]
-
-    nearests_idxs = [gnd_via_tree.nearest(pt) for pt in non_gnd_via_points]
-
-    nearests = [gnd_via_points[idx] for idx in nearests_idxs]
-    distances = [
-        shapely.distance(nearest, non_gnd_via)
-        for nearest, non_gnd_via in zip(nearests, non_gnd_via_points)
-    ]
-
-    # Get those non-gnd vias that are more than 3000000 nm away from the nearest gnd via
-    lone_via_idxs = [
-        i for i, distance in enumerate(distances) if distance > max_distance
-    ]
-
-    new_lines = []
-    for idx in lone_via_idxs:
-        # Draw a line from the lone via to the nearest gnd via on layer BL.BL_Eco2_User
-        # with thickness 0.05mm = 50000 nm
-        ngvc = non_gnd_via_coords[idx]
-        gvc = gnd_via_coords[nearests_idxs[idx]]
-        start_proto_vector = base_types_pb2.Vector2(x_nm=ngvc[0], y_nm=-ngvc[1])
-        end_proto_vector = base_types_pb2.Vector2(x_nm=gvc[0], y_nm=-gvc[1])
-
-        shape = base_types_pb2.GraphicShape(
-            segment=base_types_pb2.GraphicSegmentAttributes(
-                start=start_proto_vector, end=end_proto_vector
-            )
-        )
-
-        board_graphic_shape = board_types_pb2.BoardGraphicShape(shape=shape)
-
-        segment = kipy.board_types.BoardSegment(proto=board_graphic_shape)
-        segment.layer = BL.BL_Eco2_User
-        segment.attributes.stroke.width = 100000
-        new_lines.append(segment)
-
-    shapes = board.get_shapes()
-    eco2_shapes = [shape for shape in shapes if shape.layer == BL.BL_Eco2_User]
 
     commit = board.begin_commit()
     board.remove_items(eco2_shapes)
-    board.create_items(new_lines)
+    if items:
+        board.create_items(items)
     if args.dry_run:
         board.drop_commit(commit)
     else:
@@ -347,15 +325,18 @@ def parse_args():
 
     cut_parser.add_argument("--netclass", type=str, help="Netclass to break tracks on")
 
-    gnd_via_parser = subparsers.add_parser("gndvia", help="Visualize GND via distances")
+    gnd_via_parser = subparsers.add_parser(
+        "gndvia", help="Visualize vias without a nearby ground return via"
+    )
 
     gnd_via_parser.add_argument(
         "--distance",
         "-d",
         type=float,
-        default=2,
-        help="Maximum distance to GND via, in mm",
+        default=DEFAULT_DISTANCE,
+        help="Maximum distance to a return via, in mm",
     )
+    _add_ground_nets_argument(gnd_via_parser)
 
     padvia_parser = subparsers.add_parser(
         "padvia", help="Place a via and stub for every unserved SMD pad of given nets"

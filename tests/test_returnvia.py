@@ -1,7 +1,10 @@
+import argparse
 import math
 import sys
 
+import kipy.board_types
 import pytest
+from kipy.proto.board.board_types_pb2 import BoardLayer
 from shapely.geometry import LineString, Point, box
 
 from breakneck import cli
@@ -333,6 +336,11 @@ def _parse(monkeypatch, *argv):
     return cli.parse_args()
 
 
+def test_gndvia_and_returnvia_share_the_default_distance(monkeypatch):
+    assert _parse(monkeypatch, "gndvia").distance == 1.5
+    assert _parse(monkeypatch, "returnvia").distance == 1.5
+
+
 def test_returnvia_arguments(monkeypatch):
     args = _parse(
         monkeypatch,
@@ -353,3 +361,56 @@ def test_returnvia_arguments(monkeypatch):
 def test_returnvia_rejects_malformed_via_size(monkeypatch, bad):
     with pytest.raises(SystemExit):
         _parse(monkeypatch, "returnvia", "--via", bad)
+
+
+class _RecordingBoard:
+    def __init__(self, shapes):
+        self.shapes = shapes
+        self.calls = []
+        self.created = []
+
+    def get_shapes(self):
+        return self.shapes
+
+    def begin_commit(self):
+        self.calls.append("begin_commit")
+
+    def remove_items(self, items):
+        self.calls.append(("remove_items", len(items)))
+
+    def create_items(self, items):
+        self.calls.append("create_items")
+        self.created += items
+
+    def push_commit(self, commit):
+        self.calls.append("push_commit")
+
+    def drop_commit(self, commit):
+        self.calls.append("drop_commit")
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_gndvia_draws_eco2_lines_in_board_coordinates(monkeypatch, dry_run):
+    old = kipy.board_types.BoardSegment()
+    old.layer = BoardLayer.BL_Eco2_User
+    board = _RecordingBoard([old])
+    snap = snapshot(vias=[via("SIG", 10, 10), via("GND", 12, 11), via("X", 35, 5)])
+    monkeypatch.setattr(
+        cli.kipy, "KiCad", lambda: type("K", (), {"get_board": lambda self: board})()
+    )
+    monkeypatch.setattr(cli.Snapshot, "from_board", staticmethod(lambda b: snap))
+
+    args = argparse.Namespace(distance=1.5, ground_nets=["GND"], dry_run=dry_run)
+    cli.execute_gndvia_check(args)
+
+    assert board.calls == [
+        "begin_commit",
+        ("remove_items", 1),
+        "create_items",
+        "drop_commit" if dry_run else "push_commit",
+    ]
+    line, *marker = board.created
+    assert (line.start.x, line.start.y) == (10_000_000, 10_000_000)
+    assert (line.end.x, line.end.y) == (12_000_000, 11_000_000)
+    assert all(s.layer == BoardLayer.BL_Eco2_User for s in board.created)
+    assert marker  # the via outside every GND zone
