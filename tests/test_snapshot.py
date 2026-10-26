@@ -4,10 +4,12 @@ from typing import cast
 import kipy.board
 import kipy.board_types as kbt
 import pytest
+from kipy.errors import ApiError
 from kipy.geometry import PolygonWithHoles, PolyLineNode, Vector2
 from kipy.project_types import NetClass
 from kipy.proto.board.board_types_pb2 import BoardLayer as BL
 from kipy.proto.board.board_types_pb2 import PadType, ZoneType
+from kipy.proto.common.envelope_pb2 import ApiStatusCode
 from kipy.proto.common.types import project_settings_pb2
 from kipy.util.board_layer import canonical_name
 from shapely.geometry import Point, box
@@ -334,6 +336,7 @@ class FakeBoard:
         layers=(BL.BL_F_Cu, BL.BL_B_Cu),
         netclasses=None,
         drops_pads=False,
+        layer_names=None,
     ):
         self.pads = list(pads)
         self.zones = list(zones)
@@ -341,6 +344,7 @@ class FakeBoard:
         self.layers = list(layers)
         self.netclasses = netclasses or {}
         self.drops_pads = drops_pads
+        self.layer_names = layer_names
 
     def get_enabled_layers(self):
         return self.layers
@@ -381,6 +385,11 @@ class FakeBoard:
 
     def get_netclass_for_nets(self, nets):
         return self.netclasses
+
+    def get_layer_name(self, layer):
+        if self.layer_names is None:
+            raise ApiError("unsupported", code=ApiStatusCode.AS_UNHANDLED)
+        return self.layer_names.get(layer, canonical_name(layer))
 
 
 def read(board):
@@ -440,3 +449,15 @@ def test_via_sizes_come_from_netclasses_that_set_them():
 
     assert snap.via_sizes == {"GND": ViaSize(0.8, 0.4)}
     assert snap.via_size("SIG") == DEFAULT_VIA_SIZE
+
+
+def test_copper_layer_names_are_read_from_the_board():
+    snap = read(FakeBoard(layer_names={BL.BL_F_Cu: "Top"}))
+
+    assert snap.layer_names == {"F.Cu": "Top", "B.Cu": "B.Cu"}
+
+
+def test_layer_names_fall_back_to_canonical_when_the_board_cannot_say():
+    snap = read(FakeBoard(layer_names=None))
+
+    assert snap.layer_names == {"F.Cu": "F.Cu", "B.Cu": "B.Cu"}

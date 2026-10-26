@@ -17,6 +17,8 @@ import kipy.board
 import kipy.board_types
 import shapely
 from google.protobuf.message import Message
+from kipy.errors import ApiError
+from kipy.errors import ConnectionError as KiCadConnectionError
 from kipy.geometry import PolygonWithHoles, PolyLine, Vector2
 from kipy.proto.board.board_types_pb2 import BoardLayer, PadType, ZoneType
 from kipy.util.board_layer import canonical_name
@@ -125,6 +127,8 @@ class Snapshot:
     footprints: Sequence[Footprint] = ()
     edge_paths: Sequence[Sequence[Point2]] = ()
     via_sizes: Mapping[str, ViaSize] = field(default_factory=dict)
+    # Canonical copper layer name to the board's own name, which DRC uses.
+    layer_names: Mapping[str, str] = field(default_factory=dict)
 
     @cached_property
     def inner_layers(self) -> tuple[str, ...]:
@@ -263,6 +267,7 @@ class Snapshot:
                 for path in _edge_paths(s)
             ],
             via_sizes=_read_via_sizes(board, nets),
+            layer_names={L: _layer_name(board, L, layer_ids[L]) for L in copper_layers},
         )
         unfilled = [z for z in snap.copper_zones if not z.fills]
         logger.info(
@@ -502,6 +507,16 @@ def _edge_paths(shape: kipy.board_types.BoardShape) -> list[list[Point2]]:
             ]
     logger.warning(f"Ignoring unsupported Edge.Cuts shape {type(shape).__name__}")
     return []
+
+
+def _layer_name(
+    board: kipy.board.Board, canonical: str, layer_id: BoardLayer.ValueType
+) -> str:
+    try:
+        return board.get_layer_name(layer_id) or canonical
+    except (ApiError, KiCadConnectionError) as e:
+        logger.debug(f"KiCad did not report the name of {canonical}: {e}")
+        return canonical
 
 
 def _read_via_sizes(

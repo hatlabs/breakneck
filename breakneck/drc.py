@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import uuid
 from collections import Counter
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, TypeVar
@@ -359,15 +359,18 @@ def _is_zone(item: ViolationItem) -> bool:
     return item.description.startswith("Zone")
 
 
-def _hits(item: ViolationItem, u: PlannedUnit) -> bool:
+def _hits(item: ViolationItem, u: PlannedUnit, layer_names: Mapping[str, str]) -> bool:
     if item.description.startswith("Via"):
         return math.dist(item.position, u.position) <= POSITION_TOLERANCE
     # DRC reports a track at one of its endpoints, so match anywhere on the
-    # stub, on the stub's layer.
+    # stub, on the stub's layer under either of its names.
     if (
         item.description.startswith("Track")
         and u.stub is not None
-        and f" on {u.stub.layer}" in item.description
+        and any(
+            f" on {name}" in item.description
+            for name in (u.stub.layer, layer_names.get(u.stub.layer, u.stub.layer))
+        )
     ):
         stub = LineString([u.stub.start, u.stub.end])
         reach = u.stub.width / 2 + POSITION_TOLERANCE
@@ -376,9 +379,12 @@ def _hits(item: ViolationItem, u: PlannedUnit) -> bool:
 
 
 def _implicated(
-    v: Violation, units: Sequence[PlannedUnit], thermal_radius: float
+    v: Violation,
+    units: Sequence[PlannedUnit],
+    thermal_radius: float,
+    layer_names: Mapping[str, str],
 ) -> set[int]:
-    hit = {j for j, u in enumerate(units) for i in v.items if _hits(i, u)}
+    hit = {j for j, u in enumerate(units) for i in v.items if _hits(i, u, layer_names)}
     if v.type == STARVED_THERMAL:
         pads = [i.position for i in v.items if not _is_zone(i)]
         hit |= {
@@ -393,15 +399,17 @@ def attribute(
     violations: Iterable[Violation],
     units: Sequence[PlannedUnit],
     thermal_radius: float = DEFAULT_THERMAL_RADIUS,
+    layer_names: Mapping[str, str] | None = None,
 ) -> Attribution:
     """Pin new violations on planned units.
 
     Forced units are exempt from clearance-type violations, which are
-    reported instead.
+    reported instead. `layer_names` maps canonical copper layer names to the
+    board's own, which DRC descriptions use.
     """
     result = Attribution()
     for v in violations:
-        hit = _implicated(v, units, thermal_radius)
+        hit = _implicated(v, units, thermal_radius, layer_names or {})
         if not hit:
             result.unattributed.append(v)
             continue
@@ -456,7 +464,7 @@ def prune(
         rounds += 1
         plan = planner(snapshot, options, list(forbidden))
         found = check(plan) if plan.units else []
-        attr = attribute(found, plan.units, thermal_radius)
+        attr = attribute(found, plan.units, thermal_radius, snapshot.layer_names)
         for j, vs in sorted(attr.dropped.items()):
             dropped.append(DroppedUnit(plan.units[j], tuple(vs)))
             logger.info(

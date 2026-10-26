@@ -238,6 +238,56 @@ def test_track_item_on_planned_stub_attributes_to_its_unit():
     assert set(result.dropped) == {0}
 
 
+RENAMED = {"F.Cu": "Top", "B.Cu": "Bottom"}
+
+
+@pytest.mark.parametrize("layer_name", ["Top", "F.Cu"])
+def test_track_item_on_a_renamed_layer_attributes_to_the_stub(layer_name):
+    # KiCad describes items with the board's own layer names.
+    stub = Stub(start=(0, 0), end=(2, 0), width=0.3, layer="F.Cu")
+    v = drc.parse_report(
+        report([violation("clearance", item(f"Track [GND] on {layer_name}", 1, 0))])
+    )
+
+    result = drc.attribute(v, [unit(2, 0, stub=stub)], layer_names=RENAMED)
+
+    assert set(result.dropped) == {0}
+
+
+def test_track_item_on_another_renamed_layer_is_not_attributed():
+    stub = Stub(start=(0, 0), end=(2, 0), width=0.3, layer="F.Cu")
+    v = drc.parse_report(
+        report([violation("clearance", item("Track [GND] on Bottom", 1, 0))])
+    )
+
+    result = drc.attribute(v, [unit(2, 0, stub=stub)], layer_names=RENAMED)
+
+    assert result.dropped == {}
+
+
+def test_prune_matches_stubs_by_the_snapshot_layer_names():
+    stub = Stub(start=(0, 0), end=(2, 0), width=0.3, layer="F.Cu")
+    snap = Snapshot(copper_layers=("F.Cu", "B.Cu"), layer_names=RENAMED)
+
+    def planner(snapshot, options, forbidden):
+        return Plan(units=() if forbidden else (unit(2, 0, stub=stub),))
+
+    def check(plan):
+        return [
+            drc.Violation(
+                "clearance",
+                "c",
+                "error",
+                (drc.ViolationItem("Track [GND] on Top", (1, 0)),),
+            )
+        ]
+
+    result = drc.prune(planner, snap, None, check)
+
+    assert [d.unit.position for d in result.dropped] == [(2, 0)]
+    assert result.unattributed == ()
+
+
 def test_track_item_on_another_layer_is_not_attributed_to_the_stub():
     stub = Stub(start=(0, 0), end=(2, 0), width=0.3, layer="F.Cu")
     v = drc.parse_report(
