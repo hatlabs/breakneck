@@ -290,6 +290,19 @@ def test_free_spot_inside_mounting_hole_clearance_is_unfixable():
     assert spot.position == pytest.approx(CENTRE)
 
 
+def test_via_keeps_edge_gap_from_a_board_cutout():
+    pads = [pad("GND", CENTRE), blocker("B.Cu", EAST_CORRIDOR)]
+    slot = box(10.8, 8.5, 14, 11.5)
+    snap = snapshot(pads)
+    assert plan_padvia(snap, GND, []).units  # the corridor alone has room
+
+    cut = replace(snap, edge_paths=[*snap.edge_paths, list(slot.exterior.coords)])
+    plan = plan_padvia(cut, GND, [])
+
+    assert plan.units == ()
+    assert [s.position for s in plan.unfixable] == [pytest.approx(CENTRE)]
+
+
 def test_hole_without_clearance_override_leaves_the_spot_free():
     hole = npth((13.5, 10.0), 3.0)
     pads = [pad("GND", CENTRE), blocker("B.Cu", EAST_CORRIDOR), hole]

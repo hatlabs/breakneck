@@ -1,6 +1,7 @@
 import argparse
 import math
 import sys
+from dataclasses import replace
 
 import kipy.board_types
 import pytest
@@ -9,6 +10,7 @@ from shapely.geometry import LineString, Point, box
 
 from breakneck import cli
 from breakneck.plan import (
+    EDGE_GAP,
     FORBIDDEN_RADIUS,
     HOLE_TO_HOLE_GAP,
     OTHER_NET_CLEARANCE,
@@ -262,6 +264,25 @@ def test_return_via_keeps_clear_of_board_edge():
     result = plan(snapshot(vias=[via("SIG", 0.6, 10)], tracks=[wall]))
     assert not result.units
     assert [s.position for s in result.unfixable] == [(0.6, 10)]
+
+
+def test_force_never_places_a_via_in_or_near_a_board_cutout():
+    # Other-net copper everywhere within reach except a slot cut in the board:
+    # the slot is the only spot with clearance.
+    slot = box(10.6, 9.4, 12, 10.6)
+    blanket = pad("X", (10, 10), {"F.Cu": box(5, 5, 15, 15).difference(slot)})
+    snap = snapshot(vias=[via("SIG", 10, 10)], pads=[blanket])
+    assert plan(snap, force=True).units  # without the cutout the slot is used
+
+    slot_edge = list(slot.exterior.coords)
+    cut = replace(snap, edge_paths=[*snap.edge_paths, slot_edge])
+    result = plan(cut, force=True)
+
+    assert all(
+        Point(u.position).distance(slot) >= EDGE_GAP + VIA_RADIUS - EPS
+        for u in result.units
+    )
+    assert [s.position for s in result.unfixable] == [(10, 10)]
 
 
 def _crowded(signal_y=10.0, pitch=1.0, width=0.2):

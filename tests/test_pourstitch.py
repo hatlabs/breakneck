@@ -5,7 +5,12 @@ import pytest
 from shapely.geometry import Point, box
 from shapely.ops import unary_union
 
-from breakneck.plan import FORBIDDEN_RADIUS, OTHER_NET_CLEARANCE, PlannedUnit
+from breakneck.plan import (
+    EDGE_GAP,
+    FORBIDDEN_RADIUS,
+    OTHER_NET_CLEARANCE,
+    PlannedUnit,
+)
 from breakneck.pourstitch import (
     QUANTISATION,
     Options,
@@ -134,6 +139,26 @@ def test_too_narrow_finger_is_reported_unfixable():
     assert not [u for u in plan.units if u.position[0] > 7]
     assert plan.unfixable
     assert all(s.position[0] > 6 for s in plan.unfixable)
+
+
+def test_vias_keep_edge_gap_from_a_board_cutout():
+    pour = box(0, 0, 20, 20)
+    cutout = box(8, 8, 12, 12)
+    snap = pour_snapshot(pour)
+    snap = Snapshot(
+        copper_layers=snap.copper_layers,
+        zones=snap.zones,
+        edge_paths=[*outline_paths(pour), *outline_paths(cutout)],
+        via_sizes=snap.via_sizes,
+    )
+
+    plan = PourStitcher()(snap, options(), [])
+
+    assert plan.units
+    assert all(
+        Point(u.position).distance(cutout) >= EDGE_GAP + u.size.diameter / 2
+        for u in plan.units
+    )
 
 
 def test_forbidden_position_is_not_reused():

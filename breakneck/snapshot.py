@@ -11,10 +11,11 @@ import enum
 import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from functools import cached_property
+from functools import cached_property, reduce
 
 import kipy.board
 import kipy.board_types
+import shapely
 from google.protobuf.message import Message
 from kipy.geometry import PolygonWithHoles, PolyLine, Vector2
 from kipy.proto.board.board_types_pb2 import BoardLayer, PadType, ZoneType
@@ -131,7 +132,11 @@ class Snapshot:
 
     @cached_property
     def board_outline(self) -> BaseGeometry:
-        """Board area polygonised from the Edge.Cuts paths."""
+        """Board area polygonised from the Edge.Cuts paths.
+
+        Closed Edge.Cuts loops nest even-odd: a loop inside the outline is a
+        cutout, a loop inside a cutout is board again.
+        """
         lines = [
             LineString([_snap(p) for p in path])
             for path in self.edge_paths
@@ -139,7 +144,8 @@ class Snapshot:
         ]
         if not lines:
             return Polygon()
-        return unary_union(list(polygonize(unary_union(lines))))
+        shells = [Polygon(f.exterior) for f in polygonize(unary_union(lines))]
+        return reduce(shapely.symmetric_difference, shells, Polygon())
 
     @cached_property
     def copper_zones(self) -> tuple[Zone, ...]:

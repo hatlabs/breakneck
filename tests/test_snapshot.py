@@ -70,6 +70,36 @@ def test_open_edge_outline_gives_empty_board():
     assert snap.board_outline.is_empty
 
 
+def square_path(x0, y0, x1, y1):
+    return [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)]
+
+
+def test_internal_cutout_is_a_hole_in_the_outline():
+    paths = [square_path(0, 0, 10, 10), square_path(4, 4, 6, 6)]
+    snap = Snapshot(copper_layers=FOUR_LAYERS, edge_paths=paths)
+
+    outline = snap.board_outline
+
+    assert outline.area == pytest.approx(96)
+    assert not outline.contains(Point(5, 5))
+    assert outline.boundary.distance(Point(5, 4.5)) == pytest.approx(0.5)
+
+
+def test_island_inside_a_cutout_is_board_again():
+    paths = [
+        square_path(0, 0, 10, 10),
+        square_path(2, 2, 8, 8),
+        square_path(4, 4, 6, 6),
+    ]
+    snap = Snapshot(copper_layers=FOUR_LAYERS, edge_paths=paths)
+
+    outline = snap.board_outline
+
+    assert outline.area == pytest.approx(100 - 36 + 4)
+    assert outline.contains(Point(5, 5))
+    assert not outline.contains(Point(3, 3))
+
+
 def test_arc_points_keep_exact_endpoints_and_pass_through_mid():
     start, mid, end = (1.0, 0.0), (0.0, 1.0), (-1.0, 0.0)
 
