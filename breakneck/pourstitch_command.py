@@ -14,7 +14,8 @@ from breakneck import overlay, render
 from breakneck.commit import refill_tolerant
 from breakneck.placement import RunSettings, run_placement
 from breakneck.plan import Plan
-from breakneck.pourstitch import CoverageMap, Grid, Options, PourStitcher, summarise
+from breakneck.pourstitch import Options, PourStitcher, summarise
+from breakneck.raster import CoverageMap, Grid
 from breakneck.snapshot import Snapshot
 
 COMMAND = "pourstitch"

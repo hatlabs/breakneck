@@ -19,7 +19,7 @@ from matplotlib.patches import Circle
 
 from breakneck.overlay import OVERLAY_PPI, OVERLAY_TAG
 from breakneck.plan import Plan
-from breakneck.pourstitch import CoverageMap, Grid
+from breakneck.raster import CoverageMap, Grid
 from breakneck.snapshot import Snapshot
 
 COLORMAP = "viridis"

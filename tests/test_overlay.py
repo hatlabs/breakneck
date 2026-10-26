@@ -13,7 +13,7 @@ from shapely.geometry import box
 from breakneck import cli, overlay, render
 from breakneck.commit import CreateItemsError
 from breakneck.plan import Plan, PlannedUnit, UnfixableSpot
-from breakneck.pourstitch import CoverageMap, Grid
+from breakneck.raster import CoverageMap, Grid
 from breakneck.snapshot import NM_PER_MM, Snapshot, ViaSize
 
 D = 2.5

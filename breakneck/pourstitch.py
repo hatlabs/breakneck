@@ -18,14 +18,10 @@ from dataclasses import dataclass
 from functools import cached_property
 
 import numpy as np
-import numpy.typing as npt
-import shapely
 from loguru import logger
-from scipy import ndimage
 from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
-from skimage.graph import MCP_Geometric
 
 from breakneck.plan import (
     EDGE_GAP,
@@ -34,21 +30,25 @@ from breakneck.plan import (
     OTHER_NET_CLEARANCE,
     POURSTITCH_DISTANCE,
     POURSTITCH_FALLBACK_VIA,
-    POURSTITCH_PIXEL,
     SAME_NET_PAD_GAP,
     Plan,
     PlannedUnit,
     UnfixableSpot,
     pad_clearance,
-    raster_size,
+)
+from breakneck.raster import (
+    BoolMap,
+    CoverageMap,
+    FloatMap,
+    Grid,
+    Pixel,
+    edt,
+    geodesic,
+    touch,
+    uncovered,
 )
 from breakneck.snapshot import MIN_STITCH_LAYERS, PadKind, Point2, Snapshot, ViaSize
 
-BoolMap = npt.NDArray[np.bool_]
-FloatMap = npt.NDArray[np.floating]
-Pixel = tuple[int, int]
-
-PIXEL = POURSTITCH_PIXEL
 # Every clearance gets one pixel of margin for the rasterisation error.
 QUANTISATION = 0.1
 VIA_SPACING = 0.9
@@ -59,8 +59,6 @@ LATTICE_WINDOW = 0.6
 # A new via only shortens distances near it; bounding the update keeps it fast.
 UPDATE_REACH_FACTOR = 3
 UNREACHABLE = 1e6
-FAR = 1e9
-COORD_DECIMALS = 3
 
 
 @dataclass(frozen=True)
@@ -74,109 +72,6 @@ class Options:
     def pitch(self) -> float:
         """Square lattice pitch whose cell centre is `distance` from a site."""
         return self.distance * math.sqrt(2)
-
-
-@dataclass(frozen=True)
-class Grid:
-    """Raster of square pixels; pixel (0, 0) spans [x0, x0+pixel) × [y0, y0+pixel)."""
-
-    x0: float
-    y0: float
-    width: int
-    height: int
-    pixel: float = PIXEL
-
-    @classmethod
-    def covering(cls, bounds: tuple[float, float, float, float]) -> Grid:
-        width, height = raster_size(bounds, PIXEL)
-        return cls(bounds[0], bounds[1], width, height, PIXEL)
-
-    @property
-    def shape(self) -> tuple[int, int]:
-        return (self.height, self.width)
-
-    @cached_property
-    def xs(self) -> FloatMap:
-        return self.x0 + (np.arange(self.width) + 0.5) * self.pixel
-
-    @cached_property
-    def ys(self) -> FloatMap:
-        return self.y0 + (np.arange(self.height) + 0.5) * self.pixel
-
-    def index(self, p: Point2) -> Pixel:
-        return int((p[1] - self.y0) / self.pixel), int((p[0] - self.x0) / self.pixel)
-
-    def point(self, px: Pixel) -> Point2:
-        r, c = px
-        return (
-            round(float(self.xs[c]), COORD_DECIMALS),
-            round(float(self.ys[r]), COORD_DECIMALS),
-        )
-
-    def contains(self, px: Pixel) -> bool:
-        return 0 <= px[0] < self.height and 0 <= px[1] < self.width
-
-    def window(self, px: Pixel, radius: float) -> tuple[slice, slice]:
-        k = int(radius / self.pixel) + 1
-        r, c = px
-        return (
-            slice(max(0, r - k), min(self.height, r + k + 1)),
-            slice(max(0, c - k), min(self.width, c + k + 1)),
-        )
-
-    def bounds_window(
-        self, bounds: tuple[float, float, float, float]
-    ) -> tuple[slice, slice]:
-        x0, y0, x1, y1 = bounds
-        r0, c0 = self.index((x0, y0))
-        r1, c1 = self.index((x1, y1))
-        return (
-            slice(max(0, r0), min(self.height, r1 + 1)),
-            slice(max(0, c0), min(self.width, c1 + 1)),
-        )
-
-    def mask(
-        self, geom: BaseGeometry, win: tuple[slice, slice] | None = None
-    ) -> BoolMap:
-        rs, cs = win or (slice(None), slice(None))
-        gx, gy = np.meshgrid(self.xs[cs], self.ys[rs])
-        if geom.is_empty:
-            return np.zeros(gx.shape, bool)
-        shapely.prepare(geom)
-        return shapely.contains_xy(geom, gx, gy)
-
-    def touching(self, geom: BaseGeometry) -> BoolMap:
-        """Pixels that the geometry overlaps at all.
-
-        Distances to these pixels' centres understate the true distance by at
-        most half a pixel diagonal, which the quantisation margin absorbs.
-        Centre-inside rasters can be off by a full diagonal at corners.
-        """
-        if geom.is_empty:
-            return np.zeros(self.shape, bool)
-        return self.mask(geom.buffer(self.pixel * math.sqrt(2) / 2))
-
-    def disc(self, px: Pixel, radius: float) -> tuple[tuple[slice, slice], BoolMap]:
-        """Pixels whose centres are closer than `radius` to pixel `px`'s centre."""
-        win = self.window(px, radius)
-        rr, cc = np.ogrid[win[0], win[1]]
-        r, c = px
-        return win, (rr - r) ** 2 + (cc - c) ** 2 < (radius / self.pixel) ** 2
-
-    def distance_to(self, mask: BoolMap) -> FloatMap:
-        """Distance in mm from each pixel to the nearest True pixel."""
-        if not mask.any():
-            return np.full(self.shape, FAR, np.float32)
-        return _edt(~mask) * np.float32(self.pixel)
-
-    def depth(self, mask: BoolMap) -> FloatMap:
-        """Distance in mm from each True pixel to the nearest False pixel."""
-        return _edt(mask) * np.float32(self.pixel)
-
-
-def _edt(mask: BoolMap) -> FloatMap:
-    """Pixel distance from each True pixel to the nearest False pixel."""
-    return np.asarray(ndimage.distance_transform_edt(mask), dtype=np.float32)
 
 
 def lattice_sites(
@@ -198,32 +93,6 @@ def via_sizes(snapshot: Snapshot, options: Options, net: str) -> tuple[ViaSize, 
     """Sizes to try, preferred first."""
     default = options.via or snapshot.via_size(net)
     return tuple(dict.fromkeys((default, options.fallback_via)))
-
-
-@dataclass(frozen=True)
-class CoverageMap:
-    """Distance (mm) through `net`'s fill on `layer` to the nearest stitch.
-
-    NaN outside the fill, inf where no stitch reaches. `unstitchable` marks
-    fill no via could ever bring within D (see `_Context.unstitchable`).
-    """
-
-    net: str
-    layer: str
-    distance: FloatMap
-    unstitchable: BoolMap
-
-    def uncovered(self, distance: float) -> BoolMap:
-        """Stitchable fill farther than `distance` from a stitch."""
-        return _uncovered(self.distance, self.unstitchable, distance)
-
-
-def _uncovered(dist: FloatMap, unstitchable: BoolMap, distance: float) -> BoolMap:
-    """Pixels farther than `distance` from a stitch, unstitchable ones aside.
-
-    Outside the fill `dist` must be NaN, or the caller masks the result by it.
-    """
-    return (dist > distance) & ~unstitchable
 
 
 class _Context:
@@ -326,7 +195,7 @@ class _Context:
         snap, g = self.snapshot, self.grid
         # The False border makes the board edge count as outside.
         inside = np.pad(g.mask(snap.board_outline), 1)
-        edge = _edt(inside)[1:-1, 1:-1] * np.float32(g.pixel)
+        edge = edt(inside)[1:-1, 1:-1] * np.float32(g.pixel)
         holes = [Point(p.position).buffer(p.drill / 2) for p in snap.pads if p.drill]
         holes += [Point(v.position).buffer(v.drill / 2) for v in snap.vias]
         return (
@@ -384,11 +253,7 @@ class _Context:
 
     def touch(self, net: str, layer: str, geom: BaseGeometry) -> list[Pixel]:
         """Fill pixels of `net` on `layer` inside `geom`."""
-        g = self.grid
-        win = g.bounds_window(geom.bounds)
-        sub = g.mask(geom, win) & self.fill[(net, layer)][win]
-        rr, cc = np.nonzero(sub)
-        return list(zip((rr + win[0].start).tolist(), (cc + win[1].start).tolist()))
+        return touch(self.grid, self.fill[(net, layer)], geom)
 
     @cached_property
     def stitches(self) -> dict[str, list[dict[str, list[Pixel]]]]:
@@ -445,32 +310,8 @@ class _Context:
     def geodesic(
         self, net: str, layer: str, starts: Sequence[Pixel], limit: float | None = None
     ) -> FloatMap:
-        """Distance (mm) through the fill from the nearest start pixel.
-
-        With a limit, only the starts' bounding box grown by the limit is
-        searched: a path no longer than the limit can't leave it.
-        """
-        g = self.grid
-        fill = self.fill[(net, layer)]
-        starts = [s for s in starts if fill[s]]
-        out = np.full(g.shape, np.inf)
-        if not starts:
-            return out
-        rs, cs = zip(*starts)
-        k = g.height + g.width if limit is None else int(limit / g.pixel) + 1
-        win = (
-            slice(max(0, min(rs) - k), min(g.height, max(rs) + k + 1)),
-            slice(max(0, min(cs) - k), min(g.width, max(cs) + k + 1)),
-        )
-        mcp = MCP_Geometric(np.where(fill[win], 1.0, np.inf), fully_connected=True)
-        cum, _ = mcp.find_costs(
-            [(r - win[0].start, c - win[1].start) for r, c in starts]
-        )
-        dist = np.asarray(cum) * g.pixel
-        if limit is not None:
-            dist[dist > limit] = np.inf
-        out[win] = dist
-        return out
+        """Distance (mm) through the fill from the nearest start pixel."""
+        return geodesic(self.grid, self.fill[(net, layer)], starts, limit)
 
 
 class _NetRun:
@@ -586,7 +427,7 @@ class _NetRun:
             float(
                 np.sum(
                     ctx.fill[(self.net, L)]
-                    & _uncovered(dist, ctx.unstitchable[(self.net, L)], d)
+                    & uncovered(dist, ctx.unstitchable[(self.net, L)], d)
                 )
             )
             * px
