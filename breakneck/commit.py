@@ -236,6 +236,7 @@ def refill_tolerant(
     or dialog is active), so the call is retried instead.
     """
     polls_left = int(timeout_s / poll_s)
+    busy_logged = False
     while True:
         try:
             board.refill_zones(block=True, max_poll_seconds=timeout_s)
@@ -248,6 +249,12 @@ def refill_tolerant(
         except ApiError as e:
             if e.code != ApiStatusCode.AS_BUSY:
                 raise
+            if not busy_logged:
+                logger.warning(
+                    "KiCad is busy — a tool or dialog may be open in the PCB "
+                    "editor; retrying the zone refill"
+                )
+                busy_logged = True
             if polls_left == 0:
                 logger.warning("KiCad stayed busy; zones were not refilled")
                 return False

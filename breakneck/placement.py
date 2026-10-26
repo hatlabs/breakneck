@@ -117,7 +117,8 @@ def run_placement(
         + (f", {project.dru}" if project.dru else " (no .kicad_dru)")
     )
 
-    if not refill_tolerant(kicad, board):
+    refilled = refill_tolerant(kicad, board)
+    if not refilled:
         logger.warning("Zone refill not confirmed; fills in the snapshot may be stale")
     snapshot = Snapshot.from_board(board)
 
@@ -146,7 +147,14 @@ def run_placement(
 
     # DRC can take minutes; an edit made meanwhile was never verified.
     if board.get_as_string() != verified_text:
-        raise BoardChangedError("The board changed during the run; run again")
+        raise BoardChangedError(
+            "The board changed during the run; run again"
+            + (
+                ""
+                if refilled
+                else " (a zone refill still running from the start can also do this)"
+            )
+        )
     commit_units(kicad, board, settings.command, result.plan.units, markers)
     return RunResult(snapshot, result)
 

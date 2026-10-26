@@ -284,6 +284,31 @@ def test_board_edited_during_the_run_is_not_committed(saved_board):
     assert "begin_commit" not in board.calls and board.created == []
 
 
+def test_board_changed_after_an_unconfirmed_refill_names_the_refill(
+    saved_board, monkeypatch
+):
+    board, kicad = saved_board
+    board.texts = ["(kicad_pcb)", "(kicad_pcb (refilled))"]
+    monkeypatch.setattr(placement, "refill_tolerant", lambda kicad, board: False)
+
+    with pytest.raises(placement.BoardChangedError, match="zone refill"):
+        placement.run_placement(
+            plan_at((1, 1)), None, placement.RunSettings("test"), kicad
+        )
+
+
+def test_board_changed_after_a_confirmed_refill_does_not_blame_it(saved_board):
+    board, kicad = saved_board
+    board.texts = ["(kicad_pcb)", "(kicad_pcb (edited))"]
+
+    with pytest.raises(placement.BoardChangedError) as error:
+        placement.run_placement(
+            plan_at((1, 1)), None, placement.RunSettings("test"), kicad
+        )
+
+    assert "refill" not in str(error.value)
+
+
 def split_runner(violation_type):
     """A DRC runner reporting a connectivity violation no planned via is named in."""
 
@@ -652,6 +677,16 @@ def test_refill_refused_as_busy_is_retried():
     assert ok
     assert board.refills == 3
     assert len(sleeps) == 2
+
+
+def test_refill_busy_is_logged_once_naming_the_likely_cause(log):
+    board = RefillBoard(errors=[busy(), busy(), busy()])
+
+    commit.refill_tolerant(FakeKiCad(None), board, sleep=lambda s: None)
+
+    busy_lines = [line for line in log if "busy" in line]
+    assert len(busy_lines) == 1
+    assert busy_lines[0].startswith("WARNING") and "dialog" in busy_lines[0]
 
 
 def test_refill_busy_until_the_deadline_is_not_success():
