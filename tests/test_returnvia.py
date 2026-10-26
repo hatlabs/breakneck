@@ -387,6 +387,21 @@ def test_force_keeps_out_of_same_net_pads():
     assert result.units or result.unfixable
 
 
+def test_force_uses_a_spot_inside_the_zone_outline_but_outside_the_fill():
+    # The fill has a hole around the signal via wider than the reach, so no
+    # full-clearance spot exists.
+    fill = GND_AREA.difference(Point(10, 10).buffer(3))
+    grounds = [zone("GND", INNER, GND_AREA, fills=dict.fromkeys(INNER, fill))]
+    snap = snapshot(vias=[via("SIG", 10, 10)], zones=grounds)
+    assert not plan(snap).units
+
+    (u,) = plan(snap, force=True).units
+
+    assert u.forced
+    assert GND_AREA.contains(disk(u.position))
+    assert not fill.intersects(disk(u.position))
+
+
 def test_one_forced_via_serves_a_nearby_crowded_via_too():
     vias = [via("A", 10, 10), via("B", 10, 11)]
     result = plan(snapshot(vias=vias, tracks=_crowded()), force=True)
