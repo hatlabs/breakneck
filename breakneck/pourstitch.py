@@ -215,7 +215,15 @@ class CoverageMap:
 
     def uncovered(self, distance: float) -> BoolMap:
         """Stitchable fill farther than `distance` from a stitch."""
-        return (self.distance > distance) & ~self.unstitchable
+        return _uncovered(self.distance, self.unstitchable, distance)
+
+
+def _uncovered(dist: FloatMap, unstitchable: BoolMap, distance: float) -> BoolMap:
+    """Pixels farther than `distance` from a stitch, unstitchable ones aside.
+
+    Outside the fill `dist` must be NaN, or the caller masks the result by it.
+    """
+    return (dist > distance) & ~unstitchable
 
 
 class _Context:
@@ -274,7 +282,7 @@ class _Context:
         d = self.options.distance
         out = {}
         for net in self.nets:
-            joinable = self._joinable(net)
+            joinable = self.joinable[net]
             seeds = self.stitch_seeds(net)
             for L in self.layers[net]:
                 fill = self.fill[(net, L)]
@@ -283,19 +291,27 @@ class _Context:
                 out[(net, L)] = fill & (self.geodesic(net, L, starts, limit=d) > d)
         return out
 
-    def _joinable(self, net: str) -> BoolMap:
-        """Pixels where a via of `net` passes the zone-layer rule."""
+    @cached_property
+    def joinable(self) -> dict[str, BoolMap]:
+        """Pixels per net where a via passes the zone-layer rule."""
+        return {net: self._zone_layer_rule(net) for net in self.nets}
+
+    def _zone_layer_rule(self, net: str, min_depth: float | None = None) -> BoolMap:
+        """Pixels where the net's zone outlines cover two or more layers and
+        a via sits in the fill on each: anywhere in it, or at least
+        `min_depth` from its edge."""
         n_required = np.zeros(self.grid.shape, np.int8)
-        filled = np.ones(self.grid.shape, bool)
+        ok = np.ones(self.grid.shape, bool)
         for L in self.snapshot.copper_layers:
             outline = self.outline[(net, L)]
             n_required += outline
-            fill = self.fill.get((net, L))
-            filled &= ~outline if fill is None else ~outline | fill
-        return filled & (n_required >= MIN_STITCH_LAYERS)
-
-    def outline_layers(self, net: str, px: Pixel) -> list[str]:
-        return [L for L in self.snapshot.copper_layers if self.outline[(net, L)][px]]
+            if (net, L) not in self.fill:
+                ok &= ~outline
+            elif min_depth is None:
+                ok &= ~outline | self.fill[(net, L)]
+            else:
+                ok &= ~outline | (self.depth[(net, L)] >= min_depth)
+        return ok & (n_required >= MIN_STITCH_LAYERS)
 
     def in_fill(self, net: str, layer: str, px: Pixel, size: ViaSize) -> bool:
         depth = self.depth.get((net, layer))
@@ -328,23 +344,15 @@ class _Context:
             s: (self._edge >= r + EDGE_GAP)
             & (self._keepout >= r)
             & (self._hole >= s.drill / 2 + QUANTISATION + HOLE_TO_HOLE_GAP)
+            & self._zone_layer_rule(net, r + IN_FILL_MARGIN)
             for s, r in radius.items()
         }
-        n_required = np.zeros(g.shape, np.int8)
         for L in snap.copper_layers:
-            outline = self.outline[(net, L)]
-            n_required += outline
-            depth = self.depth.get((net, L))
-            for s, r in radius.items():
-                if depth is None:
-                    ok[s] &= ~outline
-                else:
-                    ok[s] &= ~outline | (depth >= r + IN_FILL_MARGIN)
             for gap, geoms in self._obstacles(net, L).items():
                 dist = g.distance_to(g.touching(_union(geoms)))
                 for s, r in radius.items():
                     ok[s] &= dist >= r + gap
-        return {(net, s): m & (n_required >= MIN_STITCH_LAYERS) for s, m in ok.items()}
+        return {(net, s): m for s, m in ok.items()}
 
     def _obstacles(self, net: str, layer: str) -> dict[float, list[BaseGeometry]]:
         """Copper a via of `net` must clear on `layer`, grouped by clearance.
@@ -496,11 +504,7 @@ class _NetRun:
             px = g.index(site)
             if not g.contains(px):
                 continue
-            required = ctx.outline_layers(self.net, px)
-            if len(required) < MIN_STITCH_LAYERS or not all(
-                ctx.fill[(self.net, L)][px] if (self.net, L) in ctx.fill else False
-                for L in required
-            ):
+            if not ctx.joinable[self.net][px]:
                 continue
             covered = [
                 self.dist[L][px]
@@ -582,8 +586,7 @@ class _NetRun:
             float(
                 np.sum(
                     ctx.fill[(self.net, L)]
-                    & (dist > d)
-                    & ~ctx.unstitchable[(self.net, L)]
+                    & _uncovered(dist, ctx.unstitchable[(self.net, L)], d)
                 )
             )
             * px
