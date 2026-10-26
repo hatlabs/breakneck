@@ -23,6 +23,7 @@ from breakneck.returnvia import (
     resolve_ground_nets,
     return_lines,
     unserved_vias,
+    via_references,
 )
 from breakneck.snapshot import (
     Pad,
@@ -640,3 +641,104 @@ def test_gndvia_draws_eco2_lines_in_board_coordinates(monkeypatch, dry_run):
     assert (line.end.x, line.end.y) == (12_000_000, 11_000_000)
     assert all(s.layer == BoardLayer.BL_Eco2_User for s in board.created)
     assert marker  # the via outside every GND zone
+
+
+# ---- reference planes ----------------------------------------------------------
+
+GROUNDS = ["GND", "GND_ISO"]
+SIG_AT = (10, 10)
+
+
+def references(snap, ground_nets=GROUNDS):
+    return via_references(snap, ground_nets)
+
+
+def front_track(start=(5, 10), end=SIG_AT, net="SIG"):
+    return track(net, "F.Cu", start, end)
+
+
+def back_track(start=(15, 10), end=SIG_AT, net="SIG"):
+    return track(net, "B.Cu", start, end)
+
+
+def connected(snap):
+    (r,) = references(snap)
+    return [c.layer for c in r.layers]
+
+
+def test_via_with_a_same_net_pad_on_the_back_connects_on_both_layers():
+    back_pad = pad("SIG", (10.5, 10), {"B.Cu": box(10.2, 9.7, 10.8, 10.3)})
+    snap = snapshot(vias=[via("SIG", *SIG_AT)], tracks=[front_track()], pads=[back_pad])
+
+    assert connected(snap) == ["F.Cu", "B.Cu"]
+
+
+def test_via_in_its_own_nets_pour_connects_on_the_pour_layer():
+    pour = zone("SIG", ["In2.Cu"], box(8, 8, 12, 12))
+    snap = snapshot(
+        vias=[via("SIG", *SIG_AT)],
+        tracks=[front_track()],
+        zones=[zone("GND", INNER, GND_AREA), pour],
+    )
+
+    assert connected(snap) == ["F.Cu", "In2.Cu"]
+
+
+def test_track_touching_the_via_edge_on_connects():
+    edge_on = 10 + VIA_RADIUS + 0.1  # track half-width 0.1
+    snap = snapshot(
+        vias=[via("SIG", *SIG_AT)],
+        tracks=[front_track(), back_track(start=(15, 10), end=(edge_on, 10))],
+    )
+
+    assert connected(snap) == ["F.Cu", "B.Cu"]
+
+
+# Copper on B.Cu (or a pour on In2) near the via that must not count.
+MISSES = {
+    "track-short-of-the-disc": {
+        "tracks": [track("SIG", "B.Cu", (15, 10), (10.45, 10))]
+    },
+    "other-net-track": {"tracks": [track("X", "B.Cu", (15, 10), SIG_AT)]},
+    "pad-on-another-layer": {"pads": [pad("SIG", SIG_AT, {"F.Cu": disk(SIG_AT, 0.5)})]},
+    "pour-fill-short-of-the-disc": {
+        "zones": [
+            zone("GND", INNER, GND_AREA),
+            zone(
+                "SIG",
+                ["In2.Cu"],
+                box(8, 8, 12, 12),
+                fills={"In2.Cu": box(10.35, 8, 12, 12)},
+            ),
+        ]
+    },
+}
+
+
+@pytest.mark.parametrize("miss", MISSES.values(), ids=MISSES.keys())
+def test_copper_that_misses_the_via_does_not_connect(miss):
+    extra = dict(miss)
+    tracks = [front_track(), *extra.pop("tracks", [])]
+    snap = snapshot(vias=[via("SIG", *SIG_AT)], tracks=tracks, **extra)
+
+    (r,) = references(snap)
+    assert [c.layer for c in r.layers] == ["F.Cu"]
+    assert r.exempt
+
+
+def test_floating_via_is_exempt():
+    (r,) = references(snapshot(vias=[via("SIG", *SIG_AT)]))
+
+    assert r.layers == ()
+    assert r.exempt
+    assert r.planes == ()
+
+
+@pytest.mark.parametrize("net", ["GND", "GND_ISO", ""])
+def test_ground_and_netless_vias_are_not_considered(net):
+    snap = snapshot(
+        vias=[via(net, *SIG_AT)],
+        tracks=[front_track(net=net), back_track(net=net)],
+    )
+
+    assert references(snap) == []
