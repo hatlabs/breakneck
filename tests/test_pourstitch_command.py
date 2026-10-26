@@ -73,7 +73,7 @@ def fakes(monkeypatch):
     def fake_run(planner, options, settings, kicad):
         placements.append(settings)
         plan = planner(snap, options, [])
-        return RunResult(snap, drc.PruneResult(plan, (), (), (), 1), (), False)
+        return RunResult(snap, drc.PruneResult(plan, (), (), (), 1))
 
     monkeypatch.setattr(Snapshot, "from_board", staticmethod(lambda board: snap))
     monkeypatch.setattr(

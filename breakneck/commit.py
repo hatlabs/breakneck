@@ -151,19 +151,17 @@ def create_checked(board: kipy.board.Board, items: Sequence[Wrapper]) -> list[Wr
     return [kipy.board_types.unwrap(r.item) for r in response.created_items]
 
 
-@dataclass(frozen=True)
-class CommitOutcome:
-    created: int
-
-
 def commit_units(
     kicad: kipy.KiCad,
     board: kipy.board.Board,
     command: str,
     units: Sequence[PlannedUnit],
     markers: Sequence[Marker],
-) -> CommitOutcome:
-    """Create the units plus the Eco2 markers as one commit."""
+) -> int:
+    """Create the units plus the Eco2 markers as one commit.
+
+    Returns the number of placed vias and stubs.
+    """
     nets = {n.name: n for n in board.get_nets()}
     missing = sorted({u.net for u in units} - nets.keys())
     if missing:
@@ -190,7 +188,7 @@ def commit_units(
     )
     if not refill_tolerant(kicad, board):
         logger.warning("Zone refill not confirmed; press B in KiCad to refill zones")
-    return CommitOutcome(created=len(created))
+    return len(created)
 
 
 def _busy(e: Exception) -> bool:

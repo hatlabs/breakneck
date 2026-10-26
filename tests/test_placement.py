@@ -167,7 +167,7 @@ def test_commit_creates_items_and_markers_in_one_commit():
     units = [unit(1, 0, stub=stub), unit(5, 5, net="+3.3V")]
     markers = [Marker((9, 9), MarkerKind.UNFIXABLE)]
 
-    outcome = commit.commit_units(FakeKiCad(board), board, "pourstitch", units, markers)
+    created = commit.commit_units(FakeKiCad(board), board, "pourstitch", units, markers)
 
     placed, marks = board.created
     assert [type(i).__name__ for i in placed] == ["Via", "Track", "Via"]
@@ -180,7 +180,7 @@ def test_commit_creates_items_and_markers_in_one_commit():
     pushes = [c for c in board.calls if isinstance(c, tuple)]
     assert len(pushes) == 1 and pushes[0][1].startswith("breakneck pourstitch ")
     assert board.calls.count("begin_commit") == 1
-    assert outcome.created == 3
+    assert created == 3
 
 
 def test_commit_refused_item_raises_and_drops_the_commit():

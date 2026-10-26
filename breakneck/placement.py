@@ -35,8 +35,6 @@ class RunSettings:
 class RunResult:
     snapshot: Snapshot
     prune: drc.PruneResult
-    markers: tuple[Marker, ...]
-    committed: bool
 
 
 def markers_for(
@@ -130,10 +128,10 @@ def run_placement(
 
     if settings.dry_run:
         logger.info("Dry run: nothing committed")
-        return RunResult(snapshot, result, markers, committed=False)
+        return RunResult(snapshot, result)
     if not result.plan.units and not markers:
         logger.info("Nothing to commit")
-        return RunResult(snapshot, result, markers, committed=False)
+        return RunResult(snapshot, result)
 
     commit_units(kicad, board, settings.command, result.plan.units, markers)
-    return RunResult(snapshot, result, markers, committed=True)
+    return RunResult(snapshot, result)
