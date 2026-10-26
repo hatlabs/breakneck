@@ -86,6 +86,27 @@ def _log_coverage(
         )
 
 
+def markers(
+    snapshot: Snapshot, plan: Plan, maps: Sequence[CoverageMap]
+) -> dict[render.MapKey, render.Markers]:
+    """Per map: the net's existing vias as rings, its planned vias as dots
+    and its unfixable spots, in plan order, as crosses."""
+    return {
+        (m.net, m.layer): render.Markers(
+            rings=tuple(
+                (v.position, v.diameter / 2) for v in snapshot.vias if v.net == m.net
+            ),
+            dots=tuple(
+                (u.position, u.size.diameter / 2) for u in plan.units if u.net == m.net
+            ),
+            crosses=tuple(
+                (s.layer, s.position) for s in plan.unfixable if s.net == m.net
+            ),
+        )
+        for m in maps
+    }
+
+
 def execute(
     options: Options,
     outputs: Outputs,
@@ -136,12 +157,21 @@ def execute(
 
     if outputs.render is not None:
         render.render_panels(
-            outputs.render, snapshot, grid, maps, plan, options.distance, STYLE
+            outputs.render,
+            snapshot,
+            grid,
+            maps,
+            markers(snapshot, plan, maps),
+            options.distance,
+            STYLE,
         )
         logger.info(f"Wrote {outputs.render}")
 
     if outputs.overlay_dir is not None:
-        pngs = render.write_overlays(outputs.overlay_dir, maps, options.distance, STYLE)
+        # On the board, existing and planned vias show as themselves.
+        pngs = render.write_overlays(
+            outputs.overlay_dir, grid, maps, {}, options.distance, STYLE
+        )
         layers = overlay.layer_map(snapshot.copper_layers, outputs.overlay_layers)
         placement = overlay.board_placement(snapshot.board_outline.bounds, grid.pixel)
         images = [

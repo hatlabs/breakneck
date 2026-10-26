@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,13 +19,18 @@ import numpy.typing as npt
 from matplotlib.patches import Circle
 
 from breakneck.overlay import OVERLAY_PPI, OVERLAY_TAG
-from breakneck.plan import Plan
 from breakneck.raster import CoverageMap, Grid
-from breakneck.snapshot import Snapshot
+from breakneck.snapshot import Point2, Snapshot
 
 BACKGROUND = "#101010"
 OUTLINE_COLOUR = "#888888"
 UNFIXABLE_COLOUR = "cyan"
+MARKER_COLOUR = "white"
+RING_LINE_WIDTH = 0.8
+CROSS_SIZE = 5
+CROSS_LINE_WIDTH = 1.2
+# Two pixels, so a ring stays visible on the board zoomed out.
+OVERLAY_RING_WIDTH_MM = 0.2
 # Neutral, so copper no via can reach reads apart from the distance scale.
 UNSTITCHABLE_COLOUR = "#a0a0a0"
 PANEL_COLUMNS = 2
@@ -48,6 +53,28 @@ class HeatmapStyle:
     colormap: str
     over_colour: str | None
     unreachable_colour: str
+
+
+Disc = tuple[Point2, float]
+Cross = tuple[str, Point2]
+MapKey = tuple[str, str]
+
+
+@dataclass(frozen=True)
+class Markers:
+    """What is drawn over one map: outlined circles and filled circles as
+    (centre, radius) in board mm, and crosses as (layer, position).
+
+    Crosses are the net's, in drawing order; each map's panel draws those on
+    its own layers, so a folded panel keeps the order across its layers.
+    """
+
+    rings: tuple[Disc, ...] = ()
+    dots: tuple[Disc, ...] = ()
+    crosses: tuple[Cross, ...] = ()
+
+
+NO_MARKERS = Markers()
 
 
 def _colormap(style: HeatmapStyle) -> matplotlib.colors.Colormap:
@@ -84,12 +111,32 @@ def panels(maps: Sequence[CoverageMap]) -> list[tuple[CoverageMap, list[str]]]:
     return out
 
 
+def panel_markers(
+    markers: Mapping[MapKey, Markers], m: CoverageMap, twins: Sequence[str]
+) -> Markers:
+    """Markers of a panel's map and of the layers folded into it.
+
+    Circles repeat across a net's identical layers and are drawn once;
+    crosses are those of the panel's layers.
+    """
+    out = markers.get((m.net, m.layer), NO_MARKERS)
+    for layer in twins:
+        twin = markers.get((m.net, layer), NO_MARKERS)
+        out = Markers(
+            out.rings + tuple(r for r in twin.rings if r not in out.rings),
+            out.dots + tuple(d for d in twin.dots if d not in out.dots),
+            out.crosses,
+        )
+    layers = (m.layer, *twins)
+    return Markers(out.rings, out.dots, tuple(c for c in out.crosses if c[0] in layers))
+
+
 def render_panels(
     path: Path,
     snapshot: Snapshot,
     grid: Grid,
     maps: Sequence[CoverageMap],
-    plan: Plan,
+    markers: Mapping[MapKey, Markers],
     distance: float,
     style: HeatmapStyle,
 ) -> None:
@@ -142,19 +189,23 @@ def render_panels(
             extent=extent,
             interpolation="nearest",
         )
-        for v in snapshot.vias:
-            if v.net == m.net:
-                ax.add_patch(
-                    Circle(
-                        v.position, v.diameter / 2, fill=False, color="white", lw=0.8
-                    )
+        marks = panel_markers(markers, m, twins)
+        for centre, radius in marks.rings:
+            ax.add_patch(
+                Circle(
+                    centre, radius, fill=False, color=MARKER_COLOUR, lw=RING_LINE_WIDTH
                 )
-        for u in plan.units:
-            if u.net == m.net:
-                ax.add_patch(Circle(u.position, u.size.diameter / 2, color="white"))
-        for s in plan.unfixable:
-            if s.net == m.net and s.layer in (m.layer, *twins):
-                ax.plot(*s.position, "x", color=UNFIXABLE_COLOUR, ms=5, mew=1.2)
+            )
+        for centre, radius in marks.dots:
+            ax.add_patch(Circle(centre, radius, color=MARKER_COLOUR))
+        for _, position in marks.crosses:
+            ax.plot(
+                *position,
+                "x",
+                color=UNFIXABLE_COLOUR,
+                ms=CROSS_SIZE,
+                mew=CROSS_LINE_WIDTH,
+            )
         outline = snapshot.board_outline
         for poly in getattr(outline, "geoms", [outline]):
             ax.plot(*poly.exterior.xy, color=OUTLINE_COLOUR, lw=0.8)
@@ -177,15 +228,29 @@ def render_panels(
     plt.close(fig)
 
 
+def _draw_ring(
+    rgba: npt.NDArray[np.uint8], grid: Grid, centre: Point2, radius: float
+) -> None:
+    half = OVERLAY_RING_WIDTH_MM / 2
+    rs, cs = grid.window(grid.index(centre), radius + half)
+    dx = grid.xs[cs][np.newaxis, :] - centre[0]
+    dy = grid.ys[rs][:, np.newaxis] - centre[1]
+    on = np.abs(np.hypot(dx, dy) - radius) <= half
+    rgba[rs, cs][on] = _rgba_bytes(MARKER_COLOUR)
+
+
 def overlay_rgba(
+    grid: Grid,
     maps: Sequence[CoverageMap],
+    markers: Mapping[MapKey, Markers],
     distance: float,
     style: HeatmapStyle,
 ) -> npt.NDArray[np.uint8]:
     """Composite heatmap of one layer's pours; transparent outside copper.
 
     A layer's pours of different nets don't overlap, so later maps only fill
-    pixels the earlier ones left empty.
+    pixels the earlier ones left empty. Only the markers' rings are drawn:
+    on the board, dots and crosses are vias and markers of their own.
     """
     shape = maps[0].distance.shape
     rgba = np.zeros((*shape, 4), np.uint8)
@@ -197,12 +262,17 @@ def overlay_rgba(
         rgba[inside] = colours[inside]
         rgba[np.isinf(m.distance)] = _rgba_bytes(style.unreachable_colour)
         rgba[m.unstitchable] = _rgba_bytes(UNSTITCHABLE_COLOUR)
+    rings = {r for m in maps for r in markers.get((m.net, m.layer), NO_MARKERS).rings}
+    for centre, radius in rings:
+        _draw_ring(rgba, grid, centre, radius)
     return rgba
 
 
 def write_overlays(
     out_dir: Path,
+    grid: Grid,
     maps: Sequence[CoverageMap],
+    markers: Mapping[MapKey, Markers],
     distance: float,
     style: HeatmapStyle,
 ) -> dict[str, Path]:
@@ -216,7 +286,7 @@ def write_overlays(
         path = out_dir / f"{style.png_prefix}-{layer.replace('.', '_')}.png"
         matplotlib.image.imsave(
             path,
-            overlay_rgba(layer_maps, distance, style),
+            overlay_rgba(grid, layer_maps, markers, distance, style),
             dpi=OVERLAY_PPI,
             metadata=dict([OVERLAY_TAG]),
         )
