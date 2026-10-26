@@ -249,6 +249,75 @@ def test_empty_plan_without_markers_commits_nothing(saved_board):
     assert "begin_commit" not in board.calls and pushes(board) == []
 
 
+def split_runner(violation_type):
+    """A DRC runner reporting a connectivity violation no planned via is named in."""
+
+    class SplitRunner(FakeDrcRunner):
+        def new_violations(self, plan):
+            return [
+                drc.Violation(
+                    violation_type,
+                    "split",
+                    "error",
+                    (drc.ViolationItem("Pad 1 [+5V] of J1 on F.Cu", (20, 20)),),
+                )
+            ]
+
+    return SplitRunner
+
+
+@pytest.mark.parametrize("violation_type", ["unconnected_items", "isolated_copper"])
+def test_unattributed_split_refuses_to_commit(saved_board, monkeypatch, violation_type):
+    monkeypatch.setattr(drc, "DrcRunner", split_runner(violation_type))
+    board, kicad = saved_board
+
+    with pytest.raises(placement.SplitError, match="--allow-splits"):
+        placement.run_placement(
+            plan_at((1, 1)), None, placement.RunSettings("test"), kicad
+        )
+
+    assert "begin_commit" not in board.calls and board.created == []
+
+
+def test_allow_splits_commits_with_a_marker_at_the_split(saved_board, monkeypatch):
+    monkeypatch.setattr(drc, "DrcRunner", split_runner("unconnected_items"))
+    board, kicad = saved_board
+
+    result = placement.run_placement(
+        plan_at((1, 1)), None, placement.RunSettings("test", allow_splits=True), kicad
+    )
+
+    assert len(pushes(board)) == 1
+    _, marks = board.created
+    assert len(marks) == 4  # one square
+    assert placement.markers_for(result.prune) == (
+        Marker((20, 20), MarkerKind.UNATTRIBUTED),
+    )
+
+
+def test_dry_run_reports_a_split_without_failing(saved_board, monkeypatch):
+    monkeypatch.setattr(drc, "DrcRunner", split_runner("unconnected_items"))
+    board, kicad = saved_board
+
+    result = placement.run_placement(
+        plan_at((1, 1)), None, placement.RunSettings("test", dry_run=True), kicad
+    )
+
+    assert [v.type for v in result.prune.unattributed] == ["unconnected_items"]
+    assert "begin_commit" not in board.calls
+
+
+def test_unattributed_non_connectivity_violation_still_commits(
+    saved_board, monkeypatch
+):
+    monkeypatch.setattr(drc, "DrcRunner", split_runner("copper_sliver"))
+    board, kicad = saved_board
+
+    placement.run_placement(plan_at((1, 1)), None, placement.RunSettings("test"), kicad)
+
+    assert len(pushes(board)) == 1
+
+
 # ---- commit ------------------------------------------------------------------------
 
 

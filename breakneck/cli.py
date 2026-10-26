@@ -13,7 +13,7 @@ import breakneck.overlay
 from breakneck.commit import Marker, MarkerKind, eco2_segment, marker_items
 from breakneck.overlay import DEFAULT_OVERLAY_LAYERS
 from breakneck.padvia import PadviaOptions, plan_padvia
-from breakneck.placement import RunSettings, run_placement
+from breakneck.placement import RunSettings, SplitError, run_placement
 from breakneck.plan import POURSTITCH_DISTANCE, POURSTITCH_FALLBACK_VIA
 from breakneck.returnvia import (
     DEFAULT_DISTANCE,
@@ -257,6 +257,16 @@ def add_pourstitch_parser(subparsers) -> None:
         help="User layers for the overlays, one per copper layer in stack order",
     )
     p.add_argument("--kicad-cli", metavar="PATH", help="kicad-cli binary used for DRC")
+    _add_allow_splits_argument(p)
+
+
+def _add_allow_splits_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--allow-splits",
+        action="store_true",
+        help="Commit even when DRC finds new unconnected or isolated copper "
+        "that no via could be blamed for; the spots get markers",
+    )
 
 
 def _add_ground_nets_argument(parser: argparse.ArgumentParser) -> None:
@@ -277,9 +287,12 @@ def execute_returnvia(args):
         force=args.force,
     )
     settings = RunSettings(
-        command="returnvia", dry_run=args.dry_run, kicad_cli=args.kicad_cli
+        command="returnvia",
+        dry_run=args.dry_run,
+        kicad_cli=args.kicad_cli,
+        allow_splits=args.allow_splits,
     )
-    with _exit_on(NoGroundNetsError):
+    with _exit_on(NoGroundNetsError, SplitError):
         run_placement(plan_return_vias, options, settings)
 
 
@@ -350,6 +363,7 @@ def parse_args():
     padvia_parser.add_argument(
         "--kicad-cli", metavar="PATH", help="kicad-cli binary used for DRC"
     )
+    _add_allow_splits_argument(padvia_parser)
 
     add_pourstitch_parser(subparsers)
 
@@ -389,6 +403,7 @@ def parse_args():
     returnvia_parser.add_argument(
         "--kicad-cli", metavar="PATH", help="kicad-cli binary used for DRC"
     )
+    _add_allow_splits_argument(returnvia_parser)
 
     return parser.parse_args()
 
@@ -415,8 +430,14 @@ def execute_clear(args):
 
 def execute_padvia(args):
     options = PadviaOptions(nets=tuple(args.nets), via=args.via)
-    settings = RunSettings("padvia", dry_run=args.dry_run, kicad_cli=args.kicad_cli)
-    run_placement(plan_padvia, options, settings)
+    settings = RunSettings(
+        "padvia",
+        dry_run=args.dry_run,
+        kicad_cli=args.kicad_cli,
+        allow_splits=args.allow_splits,
+    )
+    with _exit_on(SplitError):
+        run_placement(plan_padvia, options, settings)
 
 
 def execute_pourstitch(args):
@@ -439,17 +460,15 @@ def execute_pourstitch(args):
         overlay_dir=args.overlay,
         overlay_layers=tuple(args.overlay_layers),
     )
-    try:
+    with _exit_on(pourstitch_command.OverlayLayersError, SplitError):
         pourstitch_command.execute(
             options,
             outputs,
             dry_run=args.dry_run,
             check=args.check,
             kicad_cli=args.kicad_cli,
+            allow_splits=args.allow_splits,
         )
-    except pourstitch_command.OverlayLayersError as e:
-        logger.error(str(e))
-        raise SystemExit(1)
 
 
 def main():

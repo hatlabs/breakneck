@@ -29,6 +29,11 @@ class RunSettings:
     # Off where the command reports uncovered areas another way (a heatmap)
     # and per-spot markers and warnings would only be noise.
     mark_unfixable: bool = True
+    allow_splits: bool = False
+
+
+class SplitError(RuntimeError):
+    """New connectivity violations that no planned via could be blamed for."""
 
 
 @dataclass(frozen=True)
@@ -125,6 +130,7 @@ def run_placement(
 
     log_summary(settings.command, result, settings.mark_unfixable)
     markers = markers_for(result, settings.mark_unfixable)
+    _check_splits(result, settings)
 
     if settings.dry_run:
         logger.info("Dry run: nothing committed")
@@ -135,3 +141,30 @@ def run_placement(
 
     commit_units(kicad, board, settings.command, result.plan.units, markers)
     return RunResult(snapshot, result)
+
+
+def _check_splits(result: drc.PruneResult, settings: RunSettings) -> None:
+    """Refuse to commit a plan that disconnects copper, unless allowed.
+
+    Other nets' pours are not obstacles, so one via can cut a narrow neck
+    of a pour. DRC then names the pour's pads or zones, never the via, and
+    the prune loop can't drop it.
+    """
+    splits = [v for v in result.unattributed if v.type in drc.CONNECTIVITY_TYPES]
+    if not splits:
+        return
+    for v in splits:
+        logger.error(f"  connectivity: {v}")
+    message = (
+        f"{len(splits)} new connectivity violations not pinned on a planned via; "
+        "a via may split another net's pour"
+    )
+    if settings.dry_run:
+        logger.error(f"{message}; a real run would refuse to commit")
+    elif settings.allow_splits:
+        logger.warning(f"{message}; committing anyway (--allow-splits)")
+    else:
+        raise SplitError(
+            f"{message}. Nothing committed; fix the board or rerun with "
+            "--allow-splits to commit with markers"
+        )

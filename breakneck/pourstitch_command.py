@@ -77,6 +77,7 @@ def execute(
     dry_run: bool = False,
     check: bool = False,
     kicad_cli: str | None = None,
+    allow_splits: bool = False,
     kicad: kipy.KiCad | None = None,
 ) -> None:
     """Run pourstitch against the open board.
@@ -101,7 +102,13 @@ def execute(
         result = run_placement(
             stitcher,
             options,
-            RunSettings(COMMAND, dry_run, kicad_cli, mark_unfixable=False),
+            RunSettings(
+                COMMAND,
+                dry_run,
+                kicad_cli,
+                mark_unfixable=False,
+                allow_splits=allow_splits,
+            ),
             kicad,
         )
         snapshot, plan = result.snapshot, result.prune.plan

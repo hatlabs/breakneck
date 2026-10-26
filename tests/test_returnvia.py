@@ -533,6 +533,7 @@ def test_returnvia_without_a_ground_exits_with_an_error(monkeypatch):
         force=False,
         dry_run=False,
         kicad_cli=None,
+        allow_splits=False,
     )
 
     with pytest.raises(SystemExit) as exit_info:

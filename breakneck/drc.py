@@ -43,6 +43,9 @@ DEFAULT_THERMAL_RADIUS = 2.5
 CLEARANCE_TYPES = frozenset(
     {"clearance", "hole_clearance", "hole_to_hole", "copper_edge_clearance"}
 )
+# A via that splits another net's pour shows up as these, naming the pour's
+# pads or zones but not the via.
+CONNECTIVITY_TYPES = frozenset({"unconnected_items", "isolated_copper"})
 STARVED_THERMAL = "starved_thermal"
 THROUGH_VIA_LAYERS = ("F.Cu", "B.Cu")
 FONTS_MARKER = "\n\t(embedded_fonts"
