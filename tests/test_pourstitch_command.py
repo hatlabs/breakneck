@@ -192,3 +192,17 @@ def test_planned_run_reports_coverage_of_the_plan(fakes, log):
 
     reports = [line for line in log if "GND on" in line]
     assert reports and all("0.00 mm²" in line for line in reports)
+
+
+def test_planned_run_leaves_uncovered_spots_unmarked(fakes):
+    # The heatmap shows uncovered areas; per-spot Eco2 markers would be noise.
+    _, placements = fakes
+
+    pourstitch_command.execute(
+        OPTIONS,
+        pourstitch_command.Outputs(),
+        dry_run=True,
+        kicad=KiCad(Board()),  # type: ignore[arg-type]
+    )
+
+    assert [s.mark_unfixable for s in placements] == [False]

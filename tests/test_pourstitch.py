@@ -249,3 +249,24 @@ def test_coverage_counts_planned_units():
 
     assert all(np.isinf(np.nanmax(m.distance)) for m in without)
     assert all(np.nanmax(m.distance) <= D for m in with_unit)
+
+
+def test_other_net_outer_pour_pulls_back_around_new_vias():
+    # GND planes inside, a +3.3V pour on both outer layers, stitching GND alone:
+    # the +3.3V pour refills around new GND vias, so it must not block them.
+    area = box(0, 0, 20, 20)
+    layers = ("F.Cu", "In1.Cu", "In2.Cu", "B.Cu")
+    gnd = Zone("GND", ("In1.Cu", "In2.Cu"), 0, area, {"In1.Cu": area, "In2.Cu": area})
+    vcc = Zone("+3.3V", TWO_LAYERS, 0, area, {L: area for L in TWO_LAYERS})
+    snap = Snapshot(
+        copper_layers=layers,
+        zones=[gnd, vcc],
+        edge_paths=outline_paths(area),
+        via_sizes={"GND": VIA},
+    )
+    stitcher = PourStitcher()
+
+    plan = stitcher(snap, options(), [])
+
+    assert plan.units
+    assert max_uncovered(stitcher, snap, options(), plan.units) <= D

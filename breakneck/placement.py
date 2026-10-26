@@ -26,6 +26,9 @@ class RunSettings:
     kicad_cli: str | None = None
     max_rounds: int = drc.DEFAULT_MAX_ROUNDS
     thermal_radius: float = drc.DEFAULT_THERMAL_RADIUS
+    # Off where the command reports uncovered areas another way (a heatmap)
+    # and per-spot markers and warnings would only be noise.
+    mark_unfixable: bool = True
 
 
 @dataclass(frozen=True)
@@ -36,8 +39,14 @@ class RunResult:
     committed: bool
 
 
-def markers_for(result: drc.PruneResult) -> tuple[Marker, ...]:
-    out = [Marker(s.position, MarkerKind.UNFIXABLE) for s in result.plan.unfixable]
+def markers_for(
+    result: drc.PruneResult, mark_unfixable: bool = True
+) -> tuple[Marker, ...]:
+    out = (
+        [Marker(s.position, MarkerKind.UNFIXABLE) for s in result.plan.unfixable]
+        if mark_unfixable
+        else []
+    )
     out += [
         Marker(u.position, MarkerKind.FORCED) for u in result.plan.units if u.forced
     ]
@@ -49,7 +58,9 @@ def markers_for(result: drc.PruneResult) -> tuple[Marker, ...]:
     return tuple(out)
 
 
-def log_summary(command: str, result: drc.PruneResult) -> None:
+def log_summary(
+    command: str, result: drc.PruneResult, list_unfixable: bool = True
+) -> None:
     units = result.plan.units
     by_net = Counter(u.net for u in units)
     nets = ", ".join(f"{n}: {c}" for n, c in sorted(by_net.items())) or "none"
@@ -60,10 +71,13 @@ def log_summary(command: str, result: drc.PruneResult) -> None:
         x, y = d.unit.position
         rules = ", ".join(sorted({v.type for v in d.violations}))
         logger.info(f"  dropped by DRC: {d.unit.net} at ({x:.3f}, {y:.3f}): {rules}")
-    for s in result.plan.unfixable:
-        x, y = s.position
-        layer = f" on {s.layer}" if s.layer else ""
-        logger.warning(f"  unfixable: {s.net}{layer} at ({x:.3f}, {y:.3f}): {s.reason}")
+    if list_unfixable:
+        for s in result.plan.unfixable:
+            x, y = s.position
+            layer = f" on {s.layer}" if s.layer else ""
+            logger.warning(
+                f"  unfixable: {s.net}{layer} at ({x:.3f}, {y:.3f}): {s.reason}"
+            )
     forced = [u for u in units if u.forced]
     if forced:
         logger.warning(f"  {len(forced)} forced vias")
@@ -111,8 +125,8 @@ def run_placement(
             thermal_radius=settings.thermal_radius,
         )
 
-    log_summary(settings.command, result)
-    markers = markers_for(result)
+    log_summary(settings.command, result, settings.mark_unfixable)
+    markers = markers_for(result, settings.mark_unfixable)
 
     if settings.dry_run:
         logger.info("Dry run: nothing committed")

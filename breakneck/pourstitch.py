@@ -326,12 +326,7 @@ class _Context:
         for v in snap.vias:
             if v.net != net:
                 add(CLEARANCE, Point(v.position).buffer(v.diameter / 2))
-        # Pours being stitched in this run refill around the new vias; other
-        # zones are treated as fixed copper.
-        stitched = set(self.options.nets)
-        for z in snap.copper_zones:
-            if z.net != net and z.net not in stitched and layer in z.fills:
-                add(CLEARANCE, z.fills[layer])
+        # Other nets' pours are not obstacles: they refill around new vias.
         return out
 
     def touch(self, net: str, layer: str, geom: BaseGeometry) -> list[Pixel]:

@@ -190,7 +190,9 @@ def test_commit_refused_item_raises_and_drops_the_commit():
     stub = Stub(start=(0, 0), end=(1, 0), width=0.3, layer="F.Cu")
 
     with pytest.raises(commit.CreateItemsError, match="no overlapping layers"):
-        commit.commit_units(FakeKiCad(board), board, "padvia", [unit(1, 0, stub=stub)], [])
+        commit.commit_units(
+            FakeKiCad(board), board, "padvia", [unit(1, 0, stub=stub)], []
+        )
 
     assert "drop_commit" in board.calls
     assert not any(isinstance(c, tuple) and c[0] == "push_commit" for c in board.calls)
@@ -250,6 +252,13 @@ def test_markers_for_unfixable_forced_and_unattributed():
         ((3, 3), MarkerKind.UNFIXABLE),
         ((2, 2), MarkerKind.FORCED),
         ((4, 4), MarkerKind.UNATTRIBUTED),
+    ]
+
+    without_unfixable = placement.markers_for(result, mark_unfixable=False)
+
+    assert [m.kind for m in without_unfixable] == [
+        MarkerKind.FORCED,
+        MarkerKind.UNATTRIBUTED,
     ]
 
 

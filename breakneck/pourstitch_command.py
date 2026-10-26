@@ -93,7 +93,10 @@ def execute(
         plan = Plan()
     else:
         result = run_placement(
-            stitcher, options, RunSettings(COMMAND, dry_run, kicad_cli), kicad
+            stitcher,
+            options,
+            RunSettings(COMMAND, dry_run, kicad_cli, mark_unfixable=False),
+            kicad,
         )
         snapshot, plan = result.snapshot, result.prune.plan
 
