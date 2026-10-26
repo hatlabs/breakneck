@@ -1,4 +1,5 @@
 import argparse
+import importlib
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -207,6 +208,18 @@ def _exit_on(*errors: type[Exception]) -> Iterator[None]:
         raise SystemExit(1) from None
 
 
+@contextmanager
+def _needs_place_extra() -> Iterator[None]:
+    """Report a missing dependency of the place extra with the install hint."""
+    try:
+        yield
+    except ModuleNotFoundError as e:
+        logger.error(
+            f"{e}; install the place extra: uv tool install 'breakneck[place]'"
+        )
+        raise SystemExit(1)
+
+
 def parse_via_size(text: str) -> ViaSize:
     """Parse DIAMETER/DRILL in mm, e.g. 0.6/0.3."""
     try:
@@ -294,6 +307,9 @@ def _add_ground_nets_argument(parser: argparse.ArgumentParser) -> None:
 
 
 def execute_returnvia(args):
+    # The return metric needs the place extra; fail before touching the board.
+    with _needs_place_extra():
+        importlib.import_module("breakneck.returnpath")
     options = ReturnViaOptions(
         distance=args.distance,
         ground_nets=tuple(args.ground_nets) if args.ground_nets else None,
@@ -464,13 +480,8 @@ def execute_padvia(args):
 
 
 def execute_pourstitch(args):
-    try:
+    with _needs_place_extra():
         from breakneck import pourstitch, pourstitch_command
-    except ModuleNotFoundError as e:
-        logger.error(
-            f"{e}; install the place extra: uv tool install 'breakneck[place]'"
-        )
-        raise SystemExit(1)
 
     options = pourstitch.Options(
         nets=tuple(args.nets),

@@ -1,8 +1,10 @@
 """Return vias: a ground via near every via on a non-ground net.
 
-The same check drives `returnvia`, which plans the missing vias, and
+This straight-line check plans the missing vias for `returnvia` and drives
 `gndvia`, which only draws lines from each unserved via to its nearest
-return. Both use only core dependencies, so neither needs the `place` extra.
+return. It uses only core dependencies, so `gndvia` runs on the base
+install; the `returnvia` command needs the `place` extra, because it
+reports the distance through each reference plane (see `returnpath`).
 """
 
 from __future__ import annotations

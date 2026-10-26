@@ -57,13 +57,13 @@ To run breakneck without actually installing it:
 uvx breakneck <command> [options...]
 ```
 
-`returnvia`, `padvia` and `gndvia` run on the base install. `pourstitch` needs the `place` extra (scipy, scikit-image and matplotlib):
+`padvia` and `gndvia` run on the base install. `returnvia` and `pourstitch` need the `place` extra (scipy, scikit-image and matplotlib):
 
 ```
 uvx --from 'breakneck[place]' breakneck <command> [options...]
 ```
 
-To install breakneck as a tool, with the `place` extra for `pourstitch`:
+To install breakneck as a tool, with the `place` extra for `returnvia` and `pourstitch`:
 
 ```
 uv tool install 'breakneck[place]'
@@ -139,7 +139,7 @@ breakneck pourstitch --nets GND +3.3V --check --overlay
 
 ### Visualising return vias
 
-`breakneck gndvia` draws lines on User.Eco2 from each via without a return via within `--distance` (default 1.5 mm) to the nearest return via of the ground at that location. It uses the same check as `returnvia`.
+`breakneck gndvia` draws lines on User.Eco2 from each via without a return via within `--distance` (default 1.5 mm) to the nearest return via of the ground at that location. It measures straight-line distance, not the distance through the reference plane that `returnvia` reports.
 
 It is possible to run `breakneck gndvia` repeatedly using `watch` to provide semi-real time updates while placing the GND vias:
 
