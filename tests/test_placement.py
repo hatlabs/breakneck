@@ -682,7 +682,7 @@ def test_refill_refused_as_busy_is_retried():
 def test_refill_busy_is_logged_once_naming_the_likely_cause(log):
     board = RefillBoard(errors=[busy(), busy(), busy()])
 
-    commit.refill_tolerant(FakeKiCad(None), board, sleep=lambda s: None)
+    commit.refill_tolerant(FakeKiCad(None), board, sleep=lambda s: None)  # type: ignore[arg-type]
 
     busy_lines = [line for line in log if "busy" in line]
     assert len(busy_lines) == 1

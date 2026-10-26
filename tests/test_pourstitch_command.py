@@ -260,7 +260,7 @@ class ClearBoard(Board):
         self.removed: list = []
 
     def get_shapes(self):
-        corners = list(POUR.exterior.coords)
+        corners = [(x, y) for x, y in POUR.exterior.coords]
         edges = [eco2_segment(a, b) for a, b in pairwise(corners)]
         for e in edges:
             e.layer = BL.BL_Edge_Cuts
