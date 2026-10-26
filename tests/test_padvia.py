@@ -4,8 +4,10 @@ from dataclasses import replace
 import pytest
 from shapely.geometry import LineString, Point, box
 
+from breakneck import padvia
+from breakneck.obstacles import Obstacles
 from breakneck.padvia import PadviaOptions, plan_padvia
-from breakneck.plan import FORBIDDEN_RADIUS
+from breakneck.plan import FORBIDDEN_RADIUS, HOLE_TO_HOLE_GAP
 from breakneck.snapshot import (
     Footprint,
     Pad,
@@ -459,3 +461,39 @@ def test_planned_vias_respect_each_other():
     assert len(plan.units) == 2
     a, b = (Point(u.position) for u in plan.units)
     assert a.distance(b) >= 0.6 + 0.3 - 1e-9
+
+
+def test_a_later_via_keeps_hole_to_hole_from_an_earlier_planned_one():
+    # Both pads' first free spot is due east; their holes would be 0.25 mm
+    # apart. No pour on the pad layer, so the first via does not serve the
+    # second pad.
+    pads = [pad("GND", (10.0, 10.0)), pad("GND", (10.0, 10.55))]
+    snap = snapshot(pads, zones=[zone("GND", ("In1.Cu", "B.Cu"))])
+
+    plan = plan_padvia(snap, GND, [])
+
+    a, b = plan.units
+    assert math.dist(a.position, b.position) - VIA.drill >= HOLE_TO_HOLE_GAP
+
+
+def test_stub_through_a_mounting_hole_keep_off_is_rejected():
+    # The corridor opens only beyond the hole, so every stub passes it.
+    corridor = box(11.2, 9.0, 13.5, 11.0)
+    pads = [pad("GND", CENTRE), blocker("B.Cu", corridor)]
+    (unit,) = plan_padvia(snapshot(pads), GND, []).units
+    snap = snapshot([*pads, npth((10.9, 10.0), 0.4)])
+
+    plan = plan_padvia(snap, GND, [])
+
+    assert plan.units == ()
+    assert len(plan.unfixable) == 1
+    # The via spot itself keeps clear of the hole; only the stub does not.
+    own = pads[0]
+    assert padvia._via_ok(Obstacles(snap, []), unit.position, "GND", VIA, own)
+
+
+def test_via_may_sit_within_the_via_in_pad_gap_of_its_own_pad():
+    # Rounding the first clear spot to 1 µm pulls it 0.4 µm inside the gap.
+    plan = plan_padvia(snapshot([pad("GND", (10.0004, 10.0))]), GND, [])
+
+    assert plan.units[0].position == (10.7, 10.0)

@@ -4,8 +4,15 @@ import pytest
 from shapely.geometry import box
 
 from breakneck import padvia, returnvia
-from breakneck.plan import OTHER_NET_CLEARANCE, OVERRIDE_MARGIN, pad_clearance
-from breakneck.snapshot import Pad, PadKind, Snapshot, ViaSize, Zone
+from breakneck.obstacles import Obstacles
+from breakneck.plan import (
+    HOLE_TO_HOLE_GAP,
+    OTHER_NET_CLEARANCE,
+    OVERRIDE_MARGIN,
+    SAME_NET_PAD_GAP,
+    pad_clearance,
+)
+from breakneck.snapshot import Pad, PadKind, Snapshot, Via, ViaSize, Zone
 
 LAYERS = ("F.Cu", "B.Cu")
 BOARD = box(0, 0, 30, 20)
@@ -35,26 +42,22 @@ def own_pad():
     )
 
 
-def snapshot(pads=(), zones=()):
+def snapshot(pads=(), zones=(), vias=()):
     return Snapshot(
         copper_layers=LAYERS,
         pads=[own_pad(), *pads],
+        vias=list(vias),
         zones=[gnd_zone(), *zones],
         edge_paths=[[(x, y) for x, y in BOARD.exterior.coords]],
     )
 
 
 def returnvia_accepts(snap, pos):
-    board = returnvia._Board(snap, [])
-    return (
-        board.in_bounds(pos, VIA)
-        and board.connects(pos, "GND", VIA, filled=True)
-        and board.clear(pos, "GND", VIA)
-    )
+    return returnvia._spot_ok(Obstacles(snap, []), pos, "GND", VIA)
 
 
 def padvia_accepts(snap, pos):
-    return padvia._Board(snap, []).via_ok(pos, "GND", VIA, own_pad())
+    return padvia._via_ok(Obstacles(snap, []), pos, "GND", VIA, own_pad())
 
 
 def probes(x0, x1, y):
@@ -111,6 +114,42 @@ def test_planners_agree_at_a_via_keepout_rule_area():
 
     assert accepted_r == accepted_p
     assert max(p[0] for p in accepted_r) < 18 - VIA.diameter / 2
+
+
+def test_planners_agree_on_hole_to_hole_from_an_existing_via():
+    gnd = Via("v", "GND", (10.0, 10.0), VIA.diameter, VIA.drill)
+    snap = snapshot(vias=[gnd])
+    spots = probes(10.3, 11.0, 10.0)
+
+    accepted_r = [p for p in spots if returnvia_accepts(snap, p)]
+    accepted_p = [p for p in spots if padvia_accepts(snap, p)]
+
+    assert accepted_r == accepted_p
+    gap = min(p[0] for p in accepted_r) - 10.0 - VIA.drill
+    assert gap == pytest.approx(HOLE_TO_HOLE_GAP, abs=STEP)
+
+
+def test_planners_agree_on_the_gap_to_another_same_net_pad():
+    # padvia exempts only the pad it serves, not this one.
+    other = Pad(
+        id="other",
+        footprint_id=None,
+        net="GND",
+        kind=PadKind.SMD,
+        number="2",
+        position=(10.0, 10.0),
+        drill=0.0,
+        shapes={"F.Cu": box(9.5, 9.5, 10.5, 10.5)},
+    )
+    snap = snapshot(pads=[other])
+    spots = probes(10.5, 11.5, 10.0)
+
+    accepted_r = [p for p in spots if returnvia_accepts(snap, p)]
+    accepted_p = [p for p in spots if padvia_accepts(snap, p)]
+
+    assert accepted_r == accepted_p
+    gap = min(p[0] for p in accepted_r) - 10.5 - VIA.diameter / 2
+    assert gap == pytest.approx(SAME_NET_PAD_GAP, abs=STEP)
 
 
 def test_via_keepouts_are_rule_areas_that_keep_out_vias():
