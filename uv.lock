@@ -55,6 +55,7 @@ place = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "breakneck", extra = ["place"] },
     { name = "ipykernel" },
     { name = "pytest" },
 ]
@@ -74,6 +75,7 @@ provides-extras = ["place"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "breakneck", extras = ["place"] },
     { name = "ipykernel", specifier = ">=6.29.5" },
     { name = "pytest", specifier = ">=8.3.4" },
 ]

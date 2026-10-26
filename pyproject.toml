@@ -34,7 +34,12 @@ Homepage = "https://github.com/hatlabs/breakneck"
 breakneck = "breakneck.cli:main"
 
 [dependency-groups]
-dev = ["ipykernel>=6.29.5", "pytest>=8.3.4"]
+dev = [
+    "ipykernel>=6.29.5",
+    "pytest>=8.3.4",
+    # The pourstitch and render tests import the place extra at collection.
+    "breakneck[place]",
+]
 
 [build-system]
 requires = ["hatchling"]
