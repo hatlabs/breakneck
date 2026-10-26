@@ -39,3 +39,6 @@ dev = ["ipykernel>=6.29.5", "pytest>=8.3.4"]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
