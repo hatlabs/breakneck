@@ -153,6 +153,24 @@ def test_render_panels_writes_png(tmp_path: Path):
     assert Image.open(out).size[0] > 0
 
 
+def test_render_panels_paints_unreached_copper_pink(tmp_path: Path):
+    # Copper no stitch reaches has an infinite distance; imshow would draw it
+    # as background unless it is mapped above the colour scale.
+    snap = Snapshot(
+        copper_layers=("F.Cu", "B.Cu"),
+        edge_paths=[list(box(0, 0, 3, 2).exterior.coords)],  # type: ignore[list-item]
+    )
+    grid = Grid(0, 0, 30, 20)
+    maps = [coverage("GND", "F.Cu", np.full((20, 30), np.inf))]
+    out = tmp_path / "heat.png"
+
+    render.render_panels(out, snap, grid, maps, Plan(units=(), unfixable=()), D)
+
+    pixels = np.asarray(Image.open(out).convert("RGB")).reshape(-1, 3)
+    pink = tuple(int(render.OVER_COLOUR[i : i + 2], 16) for i in (1, 3, 5))
+    assert (np.abs(pixels.astype(int) - pink).sum(axis=1) < 10).sum() > 5000
+
+
 class ImageBoard:
     def __init__(self, existing=(), refuse=False):
         self.calls: list = []

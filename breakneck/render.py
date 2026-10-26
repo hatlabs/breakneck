@@ -24,6 +24,8 @@ from breakneck.snapshot import Snapshot
 
 COLORMAP = "viridis"
 OVER_COLOUR = "#ff2a6d"
+# Any value above the top of the colour scale is drawn in OVER_COLOUR.
+OVER_SCALE = 2.0
 BACKGROUND = "#101010"
 OUTLINE_COLOUR = "#888888"
 UNFIXABLE_COLOUR = "cyan"
@@ -95,8 +97,13 @@ def render_panels(
     for ax, (m, twins) in zip(axs.ravel(), shown):
         ax.set_facecolor(BACKGROUND)
         extent = (x0, x1, y1, y0)
+        # imshow draws non-finite values as background; copper no stitch
+        # reaches (inf) belongs in the over colour.
+        shown_distance = np.where(
+            np.isinf(m.distance), OVER_SCALE * distance, m.distance
+        )
         image = ax.imshow(
-            np.ma.masked_where(m.unstitchable | np.isnan(m.distance), m.distance),
+            np.ma.masked_where(m.unstitchable | np.isnan(m.distance), shown_distance),
             cmap=cmap,
             vmin=0,
             vmax=distance,
