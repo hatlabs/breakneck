@@ -489,12 +489,12 @@ def execute_pourstitch(args):
         via=args.via,
         fallback_via=args.fallback_via,
     )
-    outputs = pourstitch_command.Outputs(
+    outputs = breakneck.overlay.Outputs(
         render=args.render,
         overlay_dir=args.overlay,
         overlay_layers=tuple(args.overlay_layers),
     )
-    with _exit_on(pourstitch_command.OverlayLayersError, *PLACEMENT_ERRORS):
+    with _exit_on(breakneck.overlay.OverlayLayersError, *PLACEMENT_ERRORS):
         pourstitch_command.execute(
             options,
             outputs,

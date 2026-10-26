@@ -107,7 +107,7 @@ def test_check_reports_whole_unstitched_pour_and_commits_nothing(fakes, log):
 
     pourstitch_command.execute(
         OPTIONS,
-        pourstitch_command.Outputs(),
+        overlay.Outputs(),
         check=True,
         kicad=KiCad(board),  # type: ignore[arg-type]
     )
@@ -124,7 +124,7 @@ def test_check_reports_whole_unstitched_pour_and_commits_nothing(fakes, log):
 def test_check_with_overlay_creates_only_the_image_commit(fakes, tmp_path: Path):
     created, placements = fakes
     board = Board()
-    outputs = pourstitch_command.Outputs(overlay_dir=tmp_path)
+    outputs = overlay.Outputs(overlay_dir=tmp_path)
 
     pourstitch_command.execute(OPTIONS, outputs, check=True, kicad=KiCad(board))  # type: ignore[arg-type]
 
@@ -144,9 +144,7 @@ def test_check_with_overlay_creates_only_the_image_commit(fakes, tmp_path: Path)
 def test_dry_run_still_places_overlay(fakes, tmp_path: Path):
     created, placements = fakes
     board = Board()
-    outputs = pourstitch_command.Outputs(
-        overlay_dir=tmp_path, render=tmp_path / "heat.png"
-    )
+    outputs = overlay.Outputs(overlay_dir=tmp_path, render=tmp_path / "heat.png")
 
     pourstitch_command.execute(OPTIONS, outputs, dry_run=True, kicad=KiCad(board))  # type: ignore[arg-type]
 
@@ -162,9 +160,9 @@ def test_dry_run_still_places_overlay(fakes, tmp_path: Path):
 def test_disabled_overlay_layer_fails_before_any_board_change(fakes, tmp_path: Path):
     _, placements = fakes
     board = Board(enabled=(BL.BL_User_1,))
-    outputs = pourstitch_command.Outputs(overlay_dir=tmp_path)
+    outputs = overlay.Outputs(overlay_dir=tmp_path)
 
-    with pytest.raises(pourstitch_command.OverlayLayersError, match="User.2"):
+    with pytest.raises(overlay.OverlayLayersError, match="User.2"):
         pourstitch_command.execute(OPTIONS, outputs, kicad=KiCad(board))  # type: ignore[arg-type]
 
     assert placements == []
@@ -174,7 +172,7 @@ def test_disabled_overlay_layer_fails_before_any_board_change(fakes, tmp_path: P
 def test_disabled_overlay_layer_in_dry_run_writes_pngs_only(fakes, tmp_path: Path):
     created, _ = fakes
     board = Board(enabled=())
-    outputs = pourstitch_command.Outputs(overlay_dir=tmp_path)
+    outputs = overlay.Outputs(overlay_dir=tmp_path)
 
     pourstitch_command.execute(OPTIONS, outputs, dry_run=True, kicad=KiCad(board))  # type: ignore[arg-type]
 
@@ -184,18 +182,16 @@ def test_disabled_overlay_layer_in_dry_run_writes_pngs_only(fakes, tmp_path: Pat
 
 
 def test_too_few_overlay_layers_is_an_error(fakes, tmp_path: Path):
-    outputs = pourstitch_command.Outputs(
-        overlay_dir=tmp_path, overlay_layers=("User.1",)
-    )
+    outputs = overlay.Outputs(overlay_dir=tmp_path, overlay_layers=("User.1",))
 
-    with pytest.raises(pourstitch_command.OverlayLayersError):
+    with pytest.raises(overlay.OverlayLayersError):
         pourstitch_command.execute(OPTIONS, outputs, kicad=KiCad(Board()))  # type: ignore[arg-type]
 
 
 def test_planned_run_reports_coverage_of_the_plan(fakes, log):
     pourstitch_command.execute(
         OPTIONS,
-        pourstitch_command.Outputs(),
+        overlay.Outputs(),
         dry_run=True,
         kicad=KiCad(Board()),  # type: ignore[arg-type]
     )
@@ -210,7 +206,7 @@ def test_planned_run_leaves_uncovered_spots_unmarked(fakes):
 
     pourstitch_command.execute(
         OPTIONS,
-        pourstitch_command.Outputs(),
+        overlay.Outputs(),
         dry_run=True,
         kicad=KiCad(Board()),  # type: ignore[arg-type]
     )
@@ -245,7 +241,7 @@ def test_check_reports_unstitchable_copper_apart_from_uncovered(
 
     pourstitch_command.execute(
         OPTIONS,
-        pourstitch_command.Outputs(),
+        overlay.Outputs(),
         check=True,
         kicad=KiCad(Board()),  # type: ignore[arg-type]
     )
@@ -285,7 +281,7 @@ def test_clear_removes_the_overlays_pourstitch_placed(
 ):
     # Untagged, as earlier builds placed them, only the placement matches.
     created, _ = fakes
-    outputs = pourstitch_command.Outputs(overlay_dir=tmp_path)
+    outputs = overlay.Outputs(overlay_dir=tmp_path)
     pourstitch_command.execute(OPTIONS, outputs, check=True, kicad=KiCad(Board()))  # type: ignore[arg-type]
     assert created
     if not tagged:
@@ -312,7 +308,7 @@ def test_planning_run_logs_uncovered_area_without_unstitchable_copper(
 
     pourstitch_command.execute(
         OPTIONS,
-        pourstitch_command.Outputs(),
+        overlay.Outputs(),
         dry_run=True,
         kicad=KiCad(Board()),  # type: ignore[arg-type]
     )
@@ -335,7 +331,7 @@ class ImagesBoard(Board):
 
 def test_run_without_maps_removes_the_previous_overlays(fakes, tmp_path: Path):
     created, _ = fakes
-    outputs = pourstitch_command.Outputs(overlay_dir=tmp_path)
+    outputs = overlay.Outputs(overlay_dir=tmp_path)
     pourstitch_command.execute(OPTIONS, outputs, check=True, kicad=KiCad(Board()))  # type: ignore[arg-type]
     board = ImagesBoard(list(created))
 
