@@ -11,6 +11,7 @@ from loguru import logger
 
 import breakneck.conversions
 import breakneck.footprint
+from breakneck.padvia import parse_via_size
 
 
 def break_tracks(
@@ -263,6 +264,20 @@ def parse_args():
         help="Maximum distance to GND via, in mm",
     )
 
+    padvia_parser = subparsers.add_parser(
+        "padvia", help="Place a via and stub for every unserved SMD pad of given nets"
+    )
+    padvia_parser.add_argument(
+        "--nets", nargs="+", required=True, help="Nets whose SMD pads get vias"
+    )
+    padvia_parser.add_argument(
+        "--via",
+        type=parse_via_size,
+        metavar="DIAMETER/DRILL",
+        help="Via size in mm, overriding the net's netclass size",
+    )
+    padvia_parser.add_argument("--kicad-cli", help="Path to the kicad-cli binary")
+
     subparsers.add_parser("clear", help="Remove annotations from User.Eco2 layer")
 
     return parser.parse_args()
@@ -287,6 +302,15 @@ def execute_clear(args):
         board.push_commit(commit)
 
 
+def execute_padvia(args):
+    from breakneck.padvia import PadviaOptions, plan_padvia
+    from breakneck.placement import RunSettings, run_placement
+
+    options = PadviaOptions(nets=tuple(args.nets), via=args.via)
+    settings = RunSettings("padvia", dry_run=args.dry_run, kicad_cli=args.kicad_cli)
+    run_placement(plan_padvia, options, settings)
+
+
 def main():
     args = parse_args()
 
@@ -296,6 +320,9 @@ def main():
 
         case "gndvia":
             execute_gndvia_check(args)
+
+        case "padvia":
+            execute_padvia(args)
 
         case "clear":
             execute_clear(args)
