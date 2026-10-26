@@ -3,12 +3,14 @@
 KiCad places a reference image by its centre and sizes it as
 pixels × (25.4 mm / PPI) × scale, with the PPI read from the PNG. The
 overlay PNGs are written at `OVERLAY_PPI` and scaled so that one image pixel
-is one raster pixel.
+is one raster pixel. Each carries a PNG text chunk that marks it as
+breakneck's; KiCad keeps it in the image data it reports back.
 """
 
 from __future__ import annotations
 
 import math
+import struct
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,7 +31,12 @@ MM_PER_INCH = 25.4
 # the PNG pHYs chunk, so neither side has to round.
 OVERLAY_PPI = 254
 OVERLAY_COMMIT = "breakneck pourstitch overlay"
-# An image within these of the overlay placement is taken as breakneck's.
+OVERLAY_TAG = ("breakneck", "pourstitch-overlay")
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+PNG_CHUNK_HEADER = struct.Struct(">I4s")
+PNG_CRC_SIZE = 4
+# Untagged overlays from earlier builds are recognised by their placement:
+# an image within these of it is taken as breakneck's.
 POSITION_TOLERANCE_NM = 1000
 SCALE_TOLERANCE = 1e-6
 
@@ -113,17 +120,40 @@ def _reference_image(image: OverlayImage) -> kipy.board_types.ReferenceImage:
     return ref
 
 
+def png_text(data: bytes) -> dict[str, str]:
+    """The tEXt entries of a PNG; empty if `data` is not a PNG."""
+    if not data.startswith(PNG_SIGNATURE):
+        return {}
+    out = {}
+    at = len(PNG_SIGNATURE)
+    while at + PNG_CHUNK_HEADER.size <= len(data):
+        length, kind = PNG_CHUNK_HEADER.unpack_from(data, at)
+        body_at = at + PNG_CHUNK_HEADER.size
+        if kind == b"IEND":
+            break
+        if kind == b"tEXt":
+            key, _, value = data[body_at : body_at + length].partition(b"\0")
+            out[key.decode("latin-1")] = value.decode("latin-1")
+        at = body_at + length + PNG_CRC_SIZE
+    return out
+
+
 def is_overlay(
     image: kipy.board_types.ReferenceImage,
     placement: ImagePlacement,
     layers: Sequence[str],
 ) -> bool:
-    """Whether `image` is a breakneck overlay: on an overlay layer, at the
-    overlay placement for this board. Anything else is the user's own."""
+    """Whether `image` is a breakneck overlay: on an overlay layer, and
+    either tagged as one or at the overlay placement for this board.
+    Anything else is the user's own."""
+    if canonical_name(image.layer) not in layers:
+        return False
+    key, value = OVERLAY_TAG
+    if png_text(image.image_data).get(key) == value:
+        return True
     x, y = placement.centre
     return (
-        canonical_name(image.layer) in layers
-        and abs(image.position.x - x * NM_PER_MM) <= POSITION_TOLERANCE_NM
+        abs(image.position.x - x * NM_PER_MM) <= POSITION_TOLERANCE_NM
         and abs(image.position.y - y * NM_PER_MM) <= POSITION_TOLERANCE_NM
         and math.isclose(image.image_scale, placement.scale, rel_tol=SCALE_TOLERANCE)
     )
@@ -147,7 +177,11 @@ def place_overlays(
     hand.
     """
     placements = {i.placement for i in images}
-    old = [i for p in placements for i in overlays_on(board, overlay_layers, p)]
+    old = [
+        i
+        for i in board.get_reference_images()
+        if any(is_overlay(i, p, overlay_layers) for p in placements)
+    ]
     commit = board.begin_commit()
     try:
         if old:

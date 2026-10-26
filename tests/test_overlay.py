@@ -191,8 +191,9 @@ PLACEMENT = overlay.image_placement((1, 2), (10, 10), 0.1)
 class Existing:
     """A reference image as kipy reports it."""
 
-    def __init__(self, layer, centre=PLACEMENT.centre, scale=PLACEMENT.scale):
+    def __init__(self, layer, centre=PLACEMENT.centre, scale=PLACEMENT.scale, data=b""):
         self.layer = layer
+        self.image_data = data
         self.position = Vector2.from_xy(
             round(centre[0] * NM_PER_MM), round(centre[1] * NM_PER_MM)
         )
@@ -211,6 +212,46 @@ class Existing:
 )
 def test_only_images_at_the_overlay_placement_are_breakneck_overlays(existing, ours):
     assert overlay.is_overlay(existing, PLACEMENT, ("User.1", "User.2")) is ours  # type: ignore[arg-type]
+
+
+def png(path: Path, metadata: dict[str, str]) -> bytes:
+    render.matplotlib.image.imsave(
+        path, np.zeros((2, 2, 4), np.uint8), metadata=metadata
+    )
+    return path.read_bytes()
+
+
+def test_written_overlays_carry_the_breakneck_tag(tmp_path: Path):
+    maps = [coverage("GND", "F.Cu", np.zeros((3, 3)))]
+
+    data = render.write_overlays(tmp_path, maps, D)["F.Cu"].read_bytes()
+
+    key, value = overlay.OVERLAY_TAG
+    assert overlay.png_text(data)[key] == value
+
+
+def test_tagged_image_anywhere_on_an_overlay_layer_is_breakneck_s(tmp_path: Path):
+    # The outline changed since it was placed: the placement no longer matches.
+    data = png(tmp_path / "t.png", dict([overlay.OVERLAY_TAG]))
+    moved = Existing(BL.BL_User_1, (30, 30), 2.0, data)
+    elsewhere = Existing(BL.BL_Cmts_User, data=data)
+
+    assert overlay.is_overlay(moved, PLACEMENT, ("User.1",))  # type: ignore[arg-type]
+    assert not overlay.is_overlay(elsewhere, PLACEMENT, ("User.1",))  # type: ignore[arg-type]
+
+
+def test_untagged_image_counts_only_at_the_overlay_placement(tmp_path: Path):
+    data = png(tmp_path / "u.png", {"Software": "something else"})
+    users_own = Existing(BL.BL_User_1, (30, 30), data=data)
+    old_overlay = Existing(BL.BL_User_1, data=data)
+
+    assert not overlay.is_overlay(users_own, PLACEMENT, ("User.1",))  # type: ignore[arg-type]
+    assert overlay.is_overlay(old_overlay, PLACEMENT, ("User.1",))  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("data", [b"", b"not a png", overlay.PNG_SIGNATURE + b"\0\0"])
+def test_png_text_of_non_png_or_truncated_data_is_empty(data):
+    assert overlay.png_text(data) == {}
 
 
 def test_overlay_placement_follows_the_board_outline_raster():

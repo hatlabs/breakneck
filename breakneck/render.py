@@ -17,7 +17,7 @@ import numpy as np
 import numpy.typing as npt
 from matplotlib.patches import Circle
 
-from breakneck.overlay import OVERLAY_PPI
+from breakneck.overlay import OVERLAY_PPI, OVERLAY_TAG
 from breakneck.plan import Plan
 from breakneck.pourstitch import CoverageMap, Grid
 from breakneck.snapshot import Snapshot
@@ -182,7 +182,10 @@ def write_overlays(
     for layer, layer_maps in by_layer.items():
         path = out_dir / f"pourstitch-{layer.replace('.', '_')}.png"
         matplotlib.image.imsave(
-            path, overlay_rgba(layer_maps, distance), dpi=OVERLAY_PPI
+            path,
+            overlay_rgba(layer_maps, distance),
+            dpi=OVERLAY_PPI,
+            metadata=dict([OVERLAY_TAG]),
         )
         paths[layer] = path
     return paths
