@@ -210,17 +210,29 @@ def refill_tolerant(
 
     KiCad keeps filling after the API call times out, so wait until it
     answers a ping again. A ping reply suggests, but doesn't prove, that the
-    refill finished.
+    refill finished. AS_BUSY means KiCad refused to start the refill (a tool
+    or dialog is active), so the call is retried instead.
     """
-    try:
-        board.refill_zones(block=True, max_poll_seconds=timeout_s)
-        return True
-    except (ApiError, KiCadConnectionError) as e:
-        if not _busy(e):
-            raise
-        logger.warning(f"Zone refill timed out over the API ({e}); waiting for KiCad")
+    polls_left = int(timeout_s / poll_s)
+    while True:
+        try:
+            board.refill_zones(block=True, max_poll_seconds=timeout_s)
+            return True
+        except KiCadConnectionError as e:
+            logger.warning(
+                f"Zone refill timed out over the API ({e}); waiting for KiCad"
+            )
+            break
+        except ApiError as e:
+            if e.code != ApiStatusCode.AS_BUSY:
+                raise
+            if polls_left == 0:
+                logger.warning("KiCad stayed busy; zones were not refilled")
+                return False
+            polls_left -= 1
+            sleep(poll_s)
 
-    for _ in range(int(timeout_s / poll_s)):
+    for _ in range(polls_left):
         sleep(poll_s)
         try:
             kicad.ping()

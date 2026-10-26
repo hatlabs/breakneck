@@ -266,12 +266,22 @@ def test_markers_for_unfixable_forced_and_unattributed():
 
 
 class RefillBoard:
-    def __init__(self, error):
+    """Raises `error` from every refill, or each of `errors` in turn."""
+
+    def __init__(self, error=None, errors=()):
         self.error = error
+        self.errors = list(errors)
+        self.refills = 0
 
     def refill_zones(self, block=True, max_poll_seconds=0):
-        if self.error:
-            raise self.error
+        self.refills += 1
+        error = self.errors.pop(0) if self.errors else self.error
+        if error:
+            raise error
+
+
+def busy():
+    return ApiError("busy", code=ApiStatusCode.AS_BUSY)
 
 
 def test_refill_success():
@@ -319,3 +329,27 @@ def test_refill_reraises_real_errors():
             RefillBoard(ApiError("bad", code=ApiStatusCode.AS_BAD_REQUEST)),
             sleep=lambda s: None,
         )
+
+
+def test_refill_refused_as_busy_is_retried():
+    # AS_BUSY means KiCad refused to start the refill, not that it is running.
+    board = RefillBoard(errors=[busy(), busy()])
+    sleeps = []
+
+    ok = commit.refill_tolerant(FakeKiCad(None), board, sleep=sleeps.append)
+
+    assert ok
+    assert board.refills == 3
+    assert len(sleeps) == 2
+
+
+def test_refill_busy_until_the_deadline_is_not_success():
+    kicad = FakeKiCad(None)
+    board = RefillBoard(busy())
+
+    ok = commit.refill_tolerant(
+        kicad, board, timeout_s=3, poll_s=1, sleep=lambda s: None
+    )
+
+    assert not ok
+    assert board.refills == 4  # the first call plus one per poll
