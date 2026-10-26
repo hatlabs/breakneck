@@ -91,8 +91,7 @@ def execute_cut(args):
         sel_tracks = [
             item
             for item in items
-            if isinstance(item, kipy.board_types.Track)
-            or isinstance(item, kipy.board_types.ArcTrack)
+            if isinstance(item, (kipy.board_types.Track, kipy.board_types.ArcTrack))
         ]
 
         # get footprints from selection
@@ -125,7 +124,7 @@ def execute_cut(args):
 
     if args.netclass:
         nets = board.get_nets(args.netclass)
-        net_names = set(n.name for n in nets)
+        net_names = {n.name for n in nets}
         tracks = [t for t in tracks if t.net in net_names]
 
     num_tracks = len(tracks)
