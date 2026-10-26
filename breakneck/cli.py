@@ -14,6 +14,8 @@ import breakneck.conversions
 import breakneck.footprint
 import breakneck.overlay
 from breakneck.overlay import DEFAULT_OVERLAY_LAYERS
+from breakneck.placement import RunSettings, run_placement
+from breakneck.returnvia import DEFAULT_DISTANCE, ReturnViaOptions, plan_return_vias
 from breakneck.snapshot import ViaSize
 
 
@@ -238,7 +240,9 @@ def add_pourstitch_parser(subparsers) -> None:
         "pourstitch",
         help="Stitch pours so every point is within a distance of a via",
     )
-    p.add_argument("--nets", nargs="+", required=True, help="Nets to stitch")
+    p.add_argument(
+        "--nets", nargs="+", metavar="NET", required=True, help="Nets to stitch"
+    )
     p.add_argument(
         "--distance",
         "-d",
@@ -249,20 +253,24 @@ def add_pourstitch_parser(subparsers) -> None:
     p.add_argument(
         "--via",
         type=parse_via_size,
-        help="Via size DIAMETER/DRILL in mm (default: from the net's netclass)",
+        metavar="DIAMETER/DRILL",
+        help="Via size in mm, overriding the net's netclass size",
     )
     p.add_argument(
         "--fallback-via",
         type=parse_via_size,
         default="0.5/0.3",
-        help="Smaller via size for narrow spots, DIAMETER/DRILL in mm",
+        metavar="DIAMETER/DRILL",
+        help="Smaller via size in mm for spots the netclass size doesn't fit",
     )
     p.add_argument(
         "--check",
         action="store_true",
         help="Only measure the existing stitching; place no vias",
     )
-    p.add_argument("--render", type=Path, help="Write the heatmap panels to PATH")
+    p.add_argument(
+        "--render", type=Path, metavar="PATH", help="Write the heatmap panels to PATH"
+    )
     p.add_argument(
         "--overlay",
         nargs="?",
@@ -275,10 +283,33 @@ def add_pourstitch_parser(subparsers) -> None:
     p.add_argument(
         "--overlay-layers",
         nargs="+",
+        metavar="LAYER",
         default=list(DEFAULT_OVERLAY_LAYERS),
         help="User layers for the overlays, one per copper layer in stack order",
     )
-    p.add_argument("--kicad-cli", help="Path to kicad-cli")
+    p.add_argument("--kicad-cli", metavar="PATH", help="kicad-cli binary used for DRC")
+
+
+def _add_ground_nets_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--ground-nets",
+        nargs="+",
+        metavar="NET",
+        help="Ground nets (default: nets with zones on two or more inner layers)",
+    )
+
+
+def execute_returnvia(args):
+    options = ReturnViaOptions(
+        distance=args.distance,
+        ground_nets=tuple(args.ground_nets) if args.ground_nets else None,
+        via=args.via,
+        force=args.force,
+    )
+    settings = RunSettings(
+        command="returnvia", dry_run=args.dry_run, kicad_cli=args.kicad_cli
+    )
+    run_placement(plan_return_vias, options, settings)
 
 
 def parse_args():
@@ -330,7 +361,11 @@ def parse_args():
         "padvia", help="Place a via and stub for every unserved SMD pad of given nets"
     )
     padvia_parser.add_argument(
-        "--nets", nargs="+", required=True, help="Nets whose SMD pads get vias"
+        "--nets",
+        nargs="+",
+        metavar="NET",
+        required=True,
+        help="Nets whose SMD pads get vias",
     )
     padvia_parser.add_argument(
         "--via",
@@ -338,7 +373,9 @@ def parse_args():
         metavar="DIAMETER/DRILL",
         help="Via size in mm, overriding the net's netclass size",
     )
-    padvia_parser.add_argument("--kicad-cli", help="Path to the kicad-cli binary")
+    padvia_parser.add_argument(
+        "--kicad-cli", metavar="PATH", help="kicad-cli binary used for DRC"
+    )
 
     add_pourstitch_parser(subparsers)
 
@@ -349,8 +386,34 @@ def parse_args():
     clear_parser.add_argument(
         "--overlay-layers",
         nargs="+",
+        metavar="LAYER",
         default=list(DEFAULT_OVERLAY_LAYERS),
         help="User layers whose reference images are breakneck overlays",
+    )
+    returnvia_parser = subparsers.add_parser(
+        "returnvia", help="Place a ground return via near every signal via"
+    )
+    returnvia_parser.add_argument(
+        "--distance",
+        "-d",
+        type=float,
+        default=DEFAULT_DISTANCE,
+        help="Maximum distance from a via to its return via, in mm",
+    )
+    _add_ground_nets_argument(returnvia_parser)
+    returnvia_parser.add_argument(
+        "--via",
+        type=parse_via_size,
+        metavar="DIAMETER/DRILL",
+        help="Return via size in mm (default: the ground net's netclass)",
+    )
+    returnvia_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Place best-effort vias where none fits with full clearance",
+    )
+    returnvia_parser.add_argument(
+        "--kicad-cli", metavar="PATH", help="kicad-cli binary used for DRC"
     )
 
     return parser.parse_args()
@@ -432,6 +495,8 @@ def main():
             execute_padvia(args)
         case "pourstitch":
             execute_pourstitch(args)
+        case "returnvia":
+            execute_returnvia(args)
 
         case "clear":
             execute_clear(args)

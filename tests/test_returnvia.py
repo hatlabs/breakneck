@@ -1,8 +1,10 @@
 import math
+import sys
 
 import pytest
 from shapely.geometry import LineString, Point, box
 
+from breakneck import cli
 from breakneck.plan import FORBIDDEN_RADIUS
 from breakneck.returnvia import (
     CLEARANCE,
@@ -325,3 +327,29 @@ def test_gndvia_marks_vias_without_a_ground_or_a_return():
     assert lines == []
     assert sorted(markers) == [(10, 10), (35, 10)]
 
+
+def _parse(monkeypatch, *argv):
+    monkeypatch.setattr(sys, "argv", ["breakneck", *argv])
+    return cli.parse_args()
+
+
+def test_returnvia_arguments(monkeypatch):
+    args = _parse(
+        monkeypatch,
+        "returnvia",
+        "--via",
+        "0.5/0.25",
+        "--ground-nets",
+        "GND",
+        "GND_ISO",
+        "--force",
+    )
+    assert args.via == ViaSize(0.5, 0.25)
+    assert args.ground_nets == ["GND", "GND_ISO"]
+    assert args.force
+
+
+@pytest.mark.parametrize("bad", ["0.6", "0.3/0.6", "a/b"])
+def test_returnvia_rejects_malformed_via_size(monkeypatch, bad):
+    with pytest.raises(SystemExit):
+        _parse(monkeypatch, "returnvia", "--via", bad)
