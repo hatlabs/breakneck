@@ -55,13 +55,13 @@ To run breakneck without actually installing it:
 uvx breakneck <command> [options...]
 ```
 
-The via placement commands need the `place` extra (scipy, scikit-image and matplotlib):
+`returnvia`, `padvia` and `gndvia` run on the base install. `pourstitch` needs the `place` extra (scipy, scikit-image and matplotlib):
 
 ```
 uvx --from 'breakneck[place]' breakneck <command> [options...]
 ```
 
-To install breakneck as a tool:
+To install breakneck as a tool, with the `place` extra for `pourstitch`:
 
 ```
 uv tool install 'breakneck[place]'
