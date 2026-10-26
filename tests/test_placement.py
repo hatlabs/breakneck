@@ -11,6 +11,7 @@ from kipy.proto.common.commands.editor_commands_pb2 import (
 )
 from kipy.proto.common.envelope_pb2 import ApiStatusCode
 from kipy.proto.common.types import DocumentSpecifier
+from loguru import logger
 
 from breakneck import commit, drc, placement
 from breakneck.commit import Marker, MarkerKind
@@ -373,6 +374,56 @@ def test_commit_refused_item_raises_and_drops_the_commit():
 
     assert "drop_commit" in board.calls
     assert not any(isinstance(c, tuple) and c[0] == "push_commit" for c in board.calls)
+
+
+@pytest.fixture
+def log():
+    lines: list[str] = []
+    sink = logger.add(lambda m: lines.append(str(m)), format="{level} {message}")
+    yield lines
+    logger.remove(sink)
+
+
+class PushFailingBoard(RecordingBoard):
+    def __init__(self, error):
+        super().__init__()
+        self.error = error
+
+    def push_commit(self, c, message=""):
+        self.calls.append(("push_commit", message))
+        raise self.error
+
+
+def test_push_timeout_keeps_the_commit_and_warns(log):
+    # The commit may have landed: dropping it then would be wrong.
+    board = PushFailingBoard(ConnectionError("timed out"))
+
+    commit.commit_units(FakeKiCad(board), board, "x", [unit(1, 1)], [])  # type: ignore[arg-type]
+
+    assert "drop_commit" not in board.calls
+    assert any(line.startswith("WARNING") and "undo" in line for line in log)
+
+
+def test_push_failure_is_raised_without_dropping_the_commit():
+    board = PushFailingBoard(ApiError("bad", code=ApiStatusCode.AS_BAD_REQUEST))
+
+    with pytest.raises(ApiError):
+        commit.commit_units(FakeKiCad(board), board, "x", [unit(1, 1)], [])  # type: ignore[arg-type]
+
+    assert "drop_commit" not in board.calls
+
+
+def test_refill_error_after_the_commit_is_only_a_warning(log):
+    class RefillFailingBoard(RecordingBoard):
+        def refill_zones(self, block=True, max_poll_seconds=0):
+            raise ApiError("bad", code=ApiStatusCode.AS_BAD_REQUEST)
+
+    board = RefillFailingBoard()
+
+    commit.commit_units(FakeKiCad(board), board, "x", [unit(1, 1)], [])  # type: ignore[arg-type]
+
+    assert len(pushes(board)) == 1
+    assert any(line.startswith("WARNING") and "refill" in line for line in log)
 
 
 def test_commit_with_unknown_net_fails_before_opening_a_commit():

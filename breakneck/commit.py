@@ -177,16 +177,34 @@ def commit_units(
         created = create_checked(board, placed) if placed else []
         if markers:
             create_checked(board, marker_items(markers))
-        board.push_commit(commit, label)
     except BaseException:
         board.drop_commit(commit)
         raise
 
-    logger.info(
-        f"Committed {len(units)} vias as '{label}'"
-        + (f" and {len(markers)} markers on User.Eco2" if markers else "")
-    )
-    if not refill_tolerant(kicad, board):
+    # Outside the try above: once pushed, the commit can't be dropped, and a
+    # client timeout doesn't mean KiCad didn't land it.
+    try:
+        board.push_commit(commit, label)
+    except KiCadConnectionError as e:
+        logger.warning(
+            f"Committing '{label}' timed out over the API ({e}); it may have "
+            "landed. Check KiCad's undo history before running again"
+        )
+    except Exception as e:
+        logger.error(f"Committing '{label}' failed: {e}")
+        raise
+    else:
+        logger.info(
+            f"Committed {len(units)} vias as '{label}'"
+            + (f" and {len(markers)} markers on User.Eco2" if markers else "")
+        )
+
+    try:
+        refilled = refill_tolerant(kicad, board)
+    except (ApiError, KiCadConnectionError) as e:
+        logger.warning(f"Zone refill after the commit failed ({e})")
+        refilled = False
+    if not refilled:
         logger.warning("Zone refill not confirmed; press B in KiCad to refill zones")
     return len(created)
 
