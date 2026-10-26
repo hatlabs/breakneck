@@ -263,6 +263,23 @@ class _Board:
             gap = o.required_gap(net)
             if gap is not None and disk.distance(o.geometry) < gap:
                 return False
+        return self._holes_clear(position, size)
+
+    def keeps_unrelaxed_rules(self, position: Point2, net: str, size: ViaSize) -> bool:
+        """Rules the forced pass keeps: hole-to-hole and the same-net pad gap.
+
+        Only other-net copper clearance is relaxed for a forced via.
+        """
+        if not self._holes_clear(position, size):
+            return False
+        disk = Point(position).buffer(size.diameter / 2)
+        return all(
+            disk.distance(o.geometry) >= o.same_net_gap
+            for o in self._nearby(disk, SAME_NET_PAD_GAP)
+            if o.net == net and o.same_net_gap is not None
+        )
+
+    def _holes_clear(self, position: Point2, size: ViaSize) -> bool:
         r = size.drill / 2
         return all(
             math.dist(position, h.position) - r - h.radius >= HOLE_TO_HOLE_GAP
@@ -384,8 +401,10 @@ def _force_spot(
     for a in _angles(FORCE_RING_ANGLES):
         for r in _radii(start, distance - ROUNDING_MARGIN):
             pos = _ring_point(u.position, r, a)
-            if not board.in_bounds(pos, size) or not board.connects(
-                pos, ground, size, filled=False
+            if not (
+                board.in_bounds(pos, size)
+                and board.connects(pos, ground, size, filled=False)
+                and board.keeps_unrelaxed_rules(pos, ground, size)
             ):
                 continue
             gap = board.clearance_to_other_nets(pos, ground, size)

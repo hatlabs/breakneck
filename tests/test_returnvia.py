@@ -8,7 +8,12 @@ from kipy.proto.board.board_types_pb2 import BoardLayer
 from shapely.geometry import LineString, Point, box
 
 from breakneck import cli
-from breakneck.plan import FORBIDDEN_RADIUS, OTHER_NET_CLEARANCE
+from breakneck.plan import (
+    FORBIDDEN_RADIUS,
+    HOLE_TO_HOLE_GAP,
+    OTHER_NET_CLEARANCE,
+    SAME_NET_PAD_GAP,
+)
 from breakneck.returnvia import (
     ReturnViaOptions,
     plan_return_vias,
@@ -258,6 +263,66 @@ def test_force_never_enters_a_mounting_hole_keep_off():
     result = plan(snapshot(vias=[via("SIG", 10, 10)], pads=[hole]), force=True)
     assert not result.units
     assert [s.position for s in result.unfixable] == [(10, 10)]
+
+
+POCKET_CENTRE = (11, 10)
+
+
+def _pocket(centre=POCKET_CENTRE):
+    return box(5, 5, 15, 15).difference(Point(centre).buffer(0.4))
+
+
+def _blanket(*pockets):
+    """Other-net copper around the signal vias except pockets of room.
+
+    Each pocket is the only spot with positive clearance near it, so an
+    unrestricted forced pass puts a via at its centre.
+    """
+    copper = pockets[0]
+    for p in pockets[1:]:
+        copper = copper.intersection(p)
+    return pad("X", (7, 7), {"F.Cu": copper})
+
+
+def test_force_keeps_hole_to_hole_from_an_existing_via():
+    # A ground via 1.55 mm from the signal via doesn't serve it, but its hole
+    # is 0.55 mm from the pocket centre.
+    gnd = via("GND", 11.55, 10)
+    snap = snapshot(vias=[via("SIG", 10, 10), gnd], pads=[_blanket(_pocket())])
+
+    result = plan(snap, force=True)
+
+    for u in result.units:
+        hole_gap = math.dist(u.position, gnd.position) - u.size.drill / 2 - 0.15
+        assert hole_gap >= HOLE_TO_HOLE_GAP - EPS
+    assert result.units or result.unfixable
+
+
+def test_force_keeps_hole_to_hole_from_an_earlier_forced_via():
+    # Signal vias 2.55 mm apart, each with a pocket 1 mm away; the pockets are
+    # 0.55 mm apart, so the second forced via lands next to the first.
+    pockets = _blanket(_pocket((11, 10)), _pocket((11.55, 10)))
+    snap = snapshot(vias=[via("A", 10, 10), via("B", 12.55, 10)], pads=[pockets])
+
+    result = plan(snap, force=True)
+
+    holes = [u.position for u in result.units]
+    for i, a in enumerate(holes):
+        for b in holes[i + 1 :]:
+            assert math.dist(a, b) - 0.3 >= HOLE_TO_HOLE_GAP - EPS
+    assert len(result.units) + len(result.unfixable) == 2
+
+
+def test_force_keeps_out_of_same_net_pads():
+    gnd_pad = pad("GND", (11.25, 10), {"F.Cu": box(11.15, 9.95, 11.35, 10.05)})
+    snap = snapshot(vias=[via("SIG", 10, 10)], pads=[_blanket(_pocket()), gnd_pad])
+
+    result = plan(snap, force=True)
+
+    for u in result.units:
+        gap = disk(u.position).distance(gnd_pad.shapes["F.Cu"])
+        assert gap >= SAME_NET_PAD_GAP - EPS
+    assert result.units or result.unfixable
 
 
 def test_one_forced_via_serves_a_nearby_crowded_via_too():
