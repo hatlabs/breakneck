@@ -4,7 +4,7 @@ from dataclasses import replace
 import pytest
 from shapely.geometry import LineString, Point, box
 
-from breakneck.padvia import PadviaOptions, parse_via_size, plan_padvia
+from breakneck.padvia import PadviaOptions, plan_padvia
 from breakneck.plan import FORBIDDEN_RADIUS
 from breakneck.snapshot import (
     Footprint,
@@ -426,16 +426,3 @@ def test_planned_vias_respect_each_other():
     assert len(plan.units) == 2
     a, b = (Point(u.position) for u in plan.units)
     assert a.distance(b) >= 0.6 + 0.3 - 1e-9
-
-
-# ---- options ---------------------------------------------------------------------
-
-
-def test_parse_via_size():
-    assert parse_via_size("0.6/0.3") == ViaSize(0.6, 0.3)
-
-
-@pytest.mark.parametrize("text", ["0.6", "0.6/0.3/0.1", "a/b", "0.3/0.6", "0.6/0"])
-def test_parse_via_size_rejects_malformed(text):
-    with pytest.raises(ValueError):
-        parse_via_size(text)

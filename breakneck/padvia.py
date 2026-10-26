@@ -68,17 +68,6 @@ class _UnplatedHole:
     copper_gap: float
 
 
-def parse_via_size(text: str) -> ViaSize:
-    """Parse a `DIAMETER/DRILL` via size in mm, as given to `--via`."""
-    try:
-        diameter, drill = (float(v) for v in text.split("/"))
-    except ValueError:
-        raise ValueError(f"expected DIAMETER/DRILL in mm, got {text!r}") from None
-    if not 0 < drill < diameter:
-        raise ValueError(f"drill must be positive and below the diameter: {text!r}")
-    return ViaSize(diameter, drill)
-
-
 def _clearance(override: float | None) -> float:
     if override is None:
         return OTHER_NET_CLEARANCE

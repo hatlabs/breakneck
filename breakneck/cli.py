@@ -1,5 +1,6 @@
 import argparse
 from collections.abc import Sequence
+from pathlib import Path
 
 import kipy.board
 import kipy.board_types
@@ -11,7 +12,9 @@ from loguru import logger
 
 import breakneck.conversions
 import breakneck.footprint
-from breakneck.padvia import parse_via_size
+import breakneck.overlay
+from breakneck.overlay import DEFAULT_OVERLAY_LAYERS
+from breakneck.snapshot import ViaSize
 
 
 def break_tracks(
@@ -219,6 +222,65 @@ def execute_gndvia_check(args):
         board.push_commit(commit)
 
 
+def parse_via_size(text: str) -> ViaSize:
+    """Parse DIAMETER/DRILL in mm, e.g. 0.6/0.3."""
+    try:
+        dia, drill = (float(v) for v in text.split("/"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected DIAMETER/DRILL, got {text!r}")
+    if not 0 < drill < dia:
+        raise argparse.ArgumentTypeError(f"need 0 < drill < diameter, got {text!r}")
+    return ViaSize(dia, drill)
+
+
+def add_pourstitch_parser(subparsers) -> None:
+    p = subparsers.add_parser(
+        "pourstitch",
+        help="Stitch pours so every point is within a distance of a via",
+    )
+    p.add_argument("--nets", nargs="+", required=True, help="Nets to stitch")
+    p.add_argument(
+        "--distance",
+        "-d",
+        type=float,
+        default=2.5,
+        help="Maximum distance to a stitch, through the copper, in mm",
+    )
+    p.add_argument(
+        "--via",
+        type=parse_via_size,
+        help="Via size DIAMETER/DRILL in mm (default: from the net's netclass)",
+    )
+    p.add_argument(
+        "--fallback-via",
+        type=parse_via_size,
+        default="0.5/0.3",
+        help="Smaller via size for narrow spots, DIAMETER/DRILL in mm",
+    )
+    p.add_argument(
+        "--check",
+        action="store_true",
+        help="Only measure the existing stitching; place no vias",
+    )
+    p.add_argument("--render", type=Path, help="Write the heatmap panels to PATH")
+    p.add_argument(
+        "--overlay",
+        nargs="?",
+        type=Path,
+        const=Path("."),
+        metavar="DIR",
+        help="Write per-layer heatmap PNGs to DIR (default: .) and place them "
+        "on the board as reference images",
+    )
+    p.add_argument(
+        "--overlay-layers",
+        nargs="+",
+        default=list(DEFAULT_OVERLAY_LAYERS),
+        help="User layers for the overlays, one per copper layer in stack order",
+    )
+    p.add_argument("--kicad-cli", help="Path to kicad-cli")
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
 
@@ -278,7 +340,18 @@ def parse_args():
     )
     padvia_parser.add_argument("--kicad-cli", help="Path to the kicad-cli binary")
 
-    subparsers.add_parser("clear", help="Remove annotations from User.Eco2 layer")
+    add_pourstitch_parser(subparsers)
+
+    clear_parser = subparsers.add_parser(
+        "clear",
+        help="Remove annotations from User.Eco2 and overlay images",
+    )
+    clear_parser.add_argument(
+        "--overlay-layers",
+        nargs="+",
+        default=list(DEFAULT_OVERLAY_LAYERS),
+        help="User layers whose reference images are breakneck overlays",
+    )
 
     return parser.parse_args()
 
@@ -289,13 +362,14 @@ def execute_clear(args):
 
     shapes = board.get_shapes()
     eco2_shapes = [shape for shape in shapes if shape.layer == BL.BL_Eco2_User]
+    images = breakneck.overlay.images_on(board, args.overlay_layers)
 
-    if not shapes:
-        logger.info("No shapes to clear")
+    if not eco2_shapes and not images:
+        logger.info("Nothing to clear")
         return
 
     commit = board.begin_commit()
-    board.remove_items(eco2_shapes)
+    board.remove_items([*eco2_shapes, *images])
     if args.dry_run:
         board.drop_commit(commit)
     else:
@@ -311,6 +385,39 @@ def execute_padvia(args):
     run_placement(plan_padvia, options, settings)
 
 
+def execute_pourstitch(args):
+    try:
+        from breakneck import pourstitch, pourstitch_command
+    except ModuleNotFoundError as e:
+        logger.error(
+            f"{e}; install the place extra: uv tool install 'breakneck[place]'"
+        )
+        raise SystemExit(1)
+
+    options = pourstitch.Options(
+        nets=tuple(args.nets),
+        distance=args.distance,
+        via=args.via,
+        fallback_via=args.fallback_via,
+    )
+    outputs = pourstitch_command.Outputs(
+        render=args.render,
+        overlay_dir=args.overlay,
+        overlay_layers=tuple(args.overlay_layers),
+    )
+    try:
+        pourstitch_command.execute(
+            options,
+            outputs,
+            dry_run=args.dry_run,
+            check=args.check,
+            kicad_cli=args.kicad_cli,
+        )
+    except pourstitch_command.OverlayLayersError as e:
+        logger.error(str(e))
+        raise SystemExit(1)
+
+
 def main():
     args = parse_args()
 
@@ -323,6 +430,8 @@ def main():
 
         case "padvia":
             execute_padvia(args)
+        case "pourstitch":
+            execute_pourstitch(args)
 
         case "clear":
             execute_clear(args)

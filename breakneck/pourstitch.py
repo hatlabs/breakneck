@@ -342,38 +342,47 @@ class _Context:
         rr, cc = np.nonzero(sub)
         return list(zip((rr + win[0].start).tolist(), (cc + win[1].start).tolist()))
 
-    def stitch_seeds(
-        self, net: str, extra: Sequence[PlannedUnit] = ()
-    ) -> dict[str, list[Pixel]]:
-        """Fill pixels per layer touched by a stitch of `net`."""
+    @cached_property
+    def stitches(self) -> dict[str, list[dict[str, list[Pixel]]]]:
+        """Existing stitches per net, as the fill pixels each touches per layer."""
+        return {net: self._stitches(net) for net in self.nets}
+
+    def _stitches(self, net: str) -> list[dict[str, list[Pixel]]]:
         snap = self.snapshot
-        stitches: list[tuple[Point2, dict[str, BaseGeometry]]] = []
+        candidates: list[tuple[Point2, dict[str, BaseGeometry]]] = []
         for v in snap.vias:
             if v.net == net:
                 disc = Point(v.position).buffer(v.diameter / 2)
-                stitches.append((v.position, dict.fromkeys(snap.copper_layers, disc)))
+                candidates.append((v.position, dict.fromkeys(snap.copper_layers, disc)))
         for p in snap.pads:
             if p.net == net and p.drill and p.kind is PadKind.PTH:
-                stitches.append((p.position, dict(p.shapes)))
+                candidates.append((p.position, dict(p.shapes)))
 
-        seeds: dict[str, list[Pixel]] = {L: [] for L in self.layers[net]}
-        for pos, shapes in stitches:
+        out = []
+        for pos, shapes in candidates:
             required = snap.required_layers(net, pos)
             touched = {
                 L: self.touch(net, L, shapes[L].buffer(THERMAL_REACH))
                 for L in self.layers[net]
                 if L in shapes
             }
-            if len(required) < MIN_STITCH_LAYERS or not all(
+            if len(required) >= MIN_STITCH_LAYERS and all(
                 touched.get(L) for L in required
             ):
-                continue
-            for L, pxs in touched.items():
+                out.append(touched)
+        return out
+
+    def stitch_seeds(
+        self, net: str, extra: Sequence[PlannedUnit] = ()
+    ) -> dict[str, list[Pixel]]:
+        """Fill pixels per layer touched by a stitch of `net`."""
+        seeds: dict[str, list[Pixel]] = {L: [] for L in self.layers[net]}
+        touched = self.stitches[net] + [
+            self.unit_touch(u) for u in extra if u.net == net
+        ]
+        for t in touched:
+            for L, pxs in t.items():
                 seeds[L] += pxs
-        for u in extra:
-            if u.net == net:
-                for L, pxs in self.unit_touch(u).items():
-                    seeds[L] += pxs
         return seeds
 
     def unit_touch(self, u: PlannedUnit) -> dict[str, list[Pixel]]:
@@ -589,3 +598,27 @@ class PourStitcher:
 
     def grid(self, snapshot: Snapshot, options: Options) -> Grid:
         return self.context(snapshot, options).grid
+
+    def stitch_counts(self, snapshot: Snapshot, options: Options) -> dict[str, int]:
+        """Existing stitches per stitchable net."""
+        ctx = self.context(snapshot, options)
+        return {net: len(ctx.stitches[net]) for net in ctx.nets}
+
+
+@dataclass(frozen=True)
+class LayerCoverage:
+    net: str
+    layer: str
+    uncovered_pixels: int
+    uncovered_mm2: float
+
+
+def summarise(
+    maps: Sequence[CoverageMap], distance: float, pixel: float
+) -> list[LayerCoverage]:
+    """Fill area per net and layer farther than `distance` from a stitch."""
+    out = []
+    for m in maps:
+        n = int(np.sum(m.distance > distance))
+        out.append(LayerCoverage(m.net, m.layer, n, n * pixel * pixel))
+    return out
