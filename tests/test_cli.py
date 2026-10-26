@@ -99,3 +99,20 @@ def test_pourstitch_allow_splits_reaches_the_run_settings(monkeypatch, allow):
         )
 
     assert [s.allow_splits for s in seen] == [allow]
+
+
+@pytest.mark.parametrize(
+    "error", [placement.SplitError("split"), placement.BoardChangedError("changed")]
+)
+def test_pourstitch_placement_failure_exits_cleanly(monkeypatch, error):
+    def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(pourstitch_command, "execute", fail)
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.execute_pourstitch(parsed(monkeypatch, ["pourstitch", "--nets", "GND"]))
+
+    assert exit_info.value.code == 1
+    assert exit_info.value.__cause__ is None
+    assert exit_info.value.__suppress_context__

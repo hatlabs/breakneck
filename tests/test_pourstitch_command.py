@@ -1,3 +1,5 @@
+import argparse
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -5,7 +7,8 @@ from kipy.proto.board.board_types_pb2 import BoardLayer as BL
 from loguru import logger
 from shapely.geometry import box
 
-from breakneck import drc, overlay, pourstitch_command
+from breakneck import cli, drc, overlay, pourstitch_command
+from breakneck.commit import eco2_segment
 from breakneck.placement import RunResult, RunSettings
 from breakneck.pourstitch import Options
 from breakneck.snapshot import Snapshot, ViaSize, Zone
@@ -72,8 +75,9 @@ def fakes(monkeypatch):
 
     def fake_run(planner, options, settings, kicad):
         placements.append(settings)
-        plan = planner(snap, options, [])
-        return RunResult(snap, drc.PruneResult(plan, (), (), (), 1))
+        planned = Snapshot.from_board(kicad.get_board())
+        plan = planner(planned, options, [])
+        return RunResult(planned, drc.PruneResult(plan, (), (), (), 1))
 
     monkeypatch.setattr(Snapshot, "from_board", staticmethod(lambda board: snap))
     monkeypatch.setattr(
@@ -212,12 +216,9 @@ ISLAND = box(12, 2, 16, 6)
 ISLAND_MM2 = 16.0
 
 
-def test_check_reports_unstitchable_copper_apart_from_uncovered(
-    fakes, log, monkeypatch
-):
-    # A GND local zone on F.Cu only, beside the two-layer pour: no via can
-    # join it, so it is not counted as uncovered.
-    snap = Snapshot(
+def island_snapshot() -> Snapshot:
+    """The GND pour beside a GND local zone on F.Cu only, which no via can join."""
+    return Snapshot(
         copper_layers=LAYERS,
         zones=[
             Zone("GND", LAYERS, 0, POUR, {L: POUR for L in LAYERS}),
@@ -226,7 +227,15 @@ def test_check_reports_unstitchable_copper_apart_from_uncovered(
         edge_paths=[[(x, y) for x, y in box(0, 0, 20, 10).exterior.coords]],
         via_sizes={"GND": ViaSize(0.6, 0.3)},
     )
-    monkeypatch.setattr(Snapshot, "from_board", staticmethod(lambda board: snap))
+
+
+def test_check_reports_unstitchable_copper_apart_from_uncovered(
+    fakes, log, monkeypatch
+):
+    # No via can join the island, so it is not counted as uncovered.
+    monkeypatch.setattr(
+        Snapshot, "from_board", staticmethod(lambda board: island_snapshot())
+    )
 
     pourstitch_command.execute(
         OPTIONS,
@@ -240,3 +249,70 @@ def test_check_reports_unstitchable_copper_apart_from_uncovered(
     assert f"{ISLAND_MM2:.2f} mm² can't be stitched" in front
     (back,) = [line for line in log if "GND on B.Cu" in line]
     assert "can't be stitched" not in back
+
+
+class ClearBoard(Board):
+    """Holds the images an overlay run created, inside the snapshot's outline."""
+
+    def __init__(self, images):
+        super().__init__()
+        self.images = images
+        self.removed: list = []
+
+    def get_shapes(self):
+        corners = list(POUR.exterior.coords)
+        edges = [eco2_segment(a, b) for a, b in pairwise(corners)]
+        for e in edges:
+            e.layer = BL.BL_Edge_Cuts
+        return edges
+
+    def get_reference_images(self):
+        return self.images
+
+    def remove_items(self, items):
+        self.removed += items
+
+
+@pytest.mark.parametrize("tagged", [True, False])
+def test_clear_removes_the_overlays_pourstitch_placed(
+    fakes, tmp_path: Path, monkeypatch, tagged
+):
+    # Untagged, as earlier builds placed them, only the placement matches.
+    created, _ = fakes
+    outputs = pourstitch_command.Outputs(overlay_dir=tmp_path)
+    pourstitch_command.execute(OPTIONS, outputs, check=True, kicad=KiCad(Board()))  # type: ignore[arg-type]
+    assert created
+    if not tagged:
+        for image in created:
+            image.image_data = b""
+    board = ClearBoard(list(created))
+    monkeypatch.setattr(cli.kipy, "KiCad", lambda: KiCad(board))
+
+    cli.execute_clear(
+        argparse.Namespace(
+            overlay_layers=list(overlay.DEFAULT_OVERLAY_LAYERS), dry_run=False
+        )
+    )
+
+    assert board.removed == created
+
+
+def test_planning_run_logs_uncovered_area_without_unstitchable_copper(
+    fakes, log, monkeypatch
+):
+    monkeypatch.setattr(
+        Snapshot, "from_board", staticmethod(lambda board: island_snapshot())
+    )
+
+    pourstitch_command.execute(
+        OPTIONS,
+        pourstitch_command.Outputs(),
+        dry_run=True,
+        kicad=KiCad(Board()),  # type: ignore[arg-type]
+    )
+
+    (planner,) = [line for line in log if line.startswith("pourstitch GND:")]
+    assert "0.00 mm² beyond" in planner
+    (front,) = [line for line in log if "GND on F.Cu" in line]
+    assert "0.00 mm² (0 px)" in front
+    assert f"{ISLAND_MM2:.2f} mm² can't be stitched" in front
