@@ -286,7 +286,7 @@ class DrcRunner:
 
     def _run(self, stem: str, board_text: str) -> list[Violation]:
         pcb = self._workdir / f"{stem}.kicad_pcb"
-        pcb.write_text(board_text)
+        pcb.write_text(board_text, encoding="utf-8")
         shutil.copyfile(self._project.pro, pcb.with_suffix(".kicad_pro"))
         if self._project.dru is not None:
             shutil.copyfile(self._project.dru, pcb.with_suffix(".kicad_dru"))
@@ -309,7 +309,7 @@ class DrcRunner:
             raise DrcError(
                 f"kicad-cli DRC failed ({proc.returncode}): {proc.stderr.strip()}"
             )
-        return parse_report(json.loads(out.read_text()))
+        return parse_report(json.loads(out.read_text(encoding="utf-8")))
 
     def baseline(self) -> list[Violation]:
         if self._baseline is None:

@@ -1,3 +1,4 @@
+import io
 import json
 import stat
 import sys
@@ -528,6 +529,36 @@ def test_drc_runner_diffs_planned_copy_against_baseline(tmp_path):
     assert not list(project.glob("*.kicad_pcb")), (
         "nothing written to the project directory"
     )
+
+
+UTF8_CLI = """
+import json, pathlib, sys
+args = sys.argv[1:]
+pcb = pathlib.Path(args[-1])
+text = pcb.read_bytes().decode("utf-8")
+assert "\\u03a9" in text, "board not written as UTF-8"
+out = pathlib.Path(args[args.index("-o") + 1])
+items = [{"description": "Via 10\\u03a9", "pos": {"x": 1.0, "y": 2.0}}]
+violation = {"type": "clearance", "description": "c", "severity": "error", "items": items}
+report = {"violations": [violation] if "(via" in text else []}
+out.write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
+"""
+
+
+def test_drc_runner_uses_utf8_regardless_of_locale(tmp_path, monkeypatch):
+    # Emulate a Windows locale encoding, where Ω cannot be encoded.
+    monkeypatch.setattr(
+        io, "text_encoding", lambda encoding, stacklevel=2: encoding or "cp1252"
+    )
+    cli = make_executable(tmp_path / "kicad-cli", UTF8_CLI)
+    (tmp_path / "b.kicad_pro").write_text("{}")
+    files = drc.ProjectFiles(pro=tmp_path / "b.kicad_pro", dru=None)
+    board = BOARD_WITH_FONTS.replace('(generator "pcbnew")', '(comment "10Ω")')
+
+    runner = drc.DrcRunner(cli, files, board, tmp_path)
+    new = runner.new_violations(Plan(units=(unit(1, 2),)))
+
+    assert [v.items[0].description for v in new] == ["Via 10Ω"]
 
 
 def test_drc_runner_raises_when_kicad_cli_fails(tmp_path):
