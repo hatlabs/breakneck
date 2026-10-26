@@ -8,6 +8,7 @@ is one raster pixel.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +20,7 @@ from kipy.util.board_layer import canonical_name, layer_from_canonical_name
 from loguru import logger
 
 from breakneck.commit import CreateItemsError, create_checked
+from breakneck.plan import POURSTITCH_PIXEL, raster_size
 from breakneck.snapshot import NM_PER_MM, Point2
 
 DEFAULT_OVERLAY_LAYERS = ("User.1", "User.2", "User.3", "User.4")
@@ -27,6 +29,9 @@ MM_PER_INCH = 25.4
 # the PNG pHYs chunk, so neither side has to round.
 OVERLAY_PPI = 254
 OVERLAY_COMMIT = "breakneck pourstitch overlay"
+# An image within these of the overlay placement is taken as breakneck's.
+POSITION_TOLERANCE_NM = 1000
+SCALE_TOLERANCE = 1e-6
 
 
 @dataclass(frozen=True)
@@ -35,6 +40,13 @@ class ImagePlacement:
 
     centre: Point2
     scale: float
+
+
+def board_placement(
+    bounds: tuple[float, float, float, float], pixel: float = POURSTITCH_PIXEL
+) -> ImagePlacement:
+    """Placement of the overlays for a board whose outline has `bounds`."""
+    return image_placement((bounds[0], bounds[1]), raster_size(bounds, pixel), pixel)
 
 
 def image_placement(
@@ -101,13 +113,26 @@ def _reference_image(image: OverlayImage) -> kipy.board_types.ReferenceImage:
     return ref
 
 
-def images_on(
-    board: kipy.board.Board, layers: Sequence[str]
+def is_overlay(
+    image: kipy.board_types.ReferenceImage,
+    placement: ImagePlacement,
+    layers: Sequence[str],
+) -> bool:
+    """Whether `image` is a breakneck overlay: on an overlay layer, at the
+    overlay placement for this board. Anything else is the user's own."""
+    x, y = placement.centre
+    return (
+        canonical_name(image.layer) in layers
+        and abs(image.position.x - x * NM_PER_MM) <= POSITION_TOLERANCE_NM
+        and abs(image.position.y - y * NM_PER_MM) <= POSITION_TOLERANCE_NM
+        and math.isclose(image.image_scale, placement.scale, rel_tol=SCALE_TOLERANCE)
+    )
+
+
+def overlays_on(
+    board: kipy.board.Board, layers: Sequence[str], placement: ImagePlacement
 ) -> list[kipy.board_types.ReferenceImage]:
-    wanted = set(layers)
-    return [
-        i for i in board.get_reference_images() if canonical_name(i.layer) in wanted
-    ]
+    return [i for i in board.get_reference_images() if is_overlay(i, placement, layers)]
 
 
 def place_overlays(
@@ -115,12 +140,14 @@ def place_overlays(
     images: Sequence[OverlayImage],
     overlay_layers: Sequence[str],
 ) -> bool:
-    """Replace the reference images on the overlay layers in one commit.
+    """Replace breakneck's overlays on the overlay layers in one commit.
 
-    If KiCad refuses an image, nothing changes and the log says where to
-    place the PNGs by hand.
+    Other reference images on those layers are left alone. If KiCad refuses
+    an image, nothing changes and the log says where to place the PNGs by
+    hand.
     """
-    old = images_on(board, overlay_layers)
+    placements = {i.placement for i in images}
+    old = [i for p in placements for i in overlays_on(board, overlay_layers, p)]
     commit = board.begin_commit()
     try:
         if old:

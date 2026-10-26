@@ -5,6 +5,7 @@ must not place a via within `FORBIDDEN_RADIUS` of any forbidden position; the
 DRC prune loop feeds back the positions of units it dropped.
 """
 
+import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TypeVar
@@ -23,6 +24,15 @@ EDGE_GAP = 0.5
 # pourstitch defaults live here so the CLI can show them without the place extra.
 POURSTITCH_DISTANCE = 2.5
 POURSTITCH_FALLBACK_VIA = ViaSize(0.5, 0.3)
+POURSTITCH_PIXEL = 0.1
+
+
+def raster_size(
+    bounds: tuple[float, float, float, float], pixel: float
+) -> tuple[int, int]:
+    """(width, height) in pixels of the pourstitch raster covering `bounds`."""
+    x0, y0, x1, y1 = bounds
+    return math.ceil((x1 - x0) / pixel), math.ceil((y1 - y0) / pixel)
 
 
 @dataclass(frozen=True)

@@ -34,10 +34,12 @@ from breakneck.plan import (
     OTHER_NET_CLEARANCE,
     POURSTITCH_DISTANCE,
     POURSTITCH_FALLBACK_VIA,
+    POURSTITCH_PIXEL,
     SAME_NET_PAD_GAP,
     Plan,
     PlannedUnit,
     UnfixableSpot,
+    raster_size,
 )
 from breakneck.snapshot import MIN_STITCH_LAYERS, PadKind, Point2, Snapshot, ViaSize
 
@@ -45,7 +47,7 @@ BoolMap = npt.NDArray[np.bool_]
 FloatMap = npt.NDArray[np.floating]
 Pixel = tuple[int, int]
 
-PIXEL = 0.1
+PIXEL = POURSTITCH_PIXEL
 # Every clearance gets one pixel of margin for the rasterisation error.
 QUANTISATION = 0.1
 VIA_SPACING = 0.9
@@ -87,10 +89,8 @@ class Grid:
 
     @classmethod
     def covering(cls, bounds: tuple[float, float, float, float]) -> Grid:
-        x0, y0, x1, y1 = bounds
-        return cls(
-            x0, y0, math.ceil((x1 - x0) / PIXEL), math.ceil((y1 - y0) / PIXEL), PIXEL
-        )
+        width, height = raster_size(bounds, PIXEL)
+        return cls(bounds[0], bounds[1], width, height, PIXEL)
 
     @property
     def shape(self) -> tuple[int, int]:

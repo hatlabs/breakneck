@@ -260,12 +260,7 @@ class Snapshot:
                 if z.type in (ZoneType.ZT_COPPER, ZoneType.ZT_RULE_AREA)
             ],
             footprints=[_read_footprint(f) for f in board.get_footprints()],
-            edge_paths=[
-                path
-                for s in board.get_shapes()
-                if canonical_name(s.layer) == EDGE_CUTS
-                for path in _edge_paths(s)
-            ],
+            edge_paths=read_edge_paths(board.get_shapes()),
             via_sizes=_read_via_sizes(board, nets),
             layer_names={L: _layer_name(board, L, layer_ids[L]) for L in copper_layers},
         )
@@ -486,6 +481,18 @@ def _read_footprint(f: kipy.board_types.FootprintInstance) -> Footprint:
         position=_mm(f.position),
         layer=canonical_name(f.layer),
     )
+
+
+def read_edge_paths(
+    shapes: Iterable[kipy.board_types.BoardShape],
+) -> list[list[Point2]]:
+    """The Edge.Cuts paths among `shapes`."""
+    return [
+        path
+        for s in shapes
+        if canonical_name(s.layer) == EDGE_CUTS
+        for path in _edge_paths(s)
+    ]
 
 
 def _edge_paths(shape: kipy.board_types.BoardShape) -> list[list[Point2]]:

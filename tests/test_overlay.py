@@ -1,16 +1,20 @@
+import argparse
+from itertools import pairwise
 from pathlib import Path
 
 import numpy as np
 import pytest
+from kipy.board_types import BoardSegment
+from kipy.geometry import Vector2
 from kipy.proto.board.board_types_pb2 import BoardLayer as BL
 from PIL import Image
 from shapely.geometry import box
 
-from breakneck import overlay, render
+from breakneck import cli, overlay, render
 from breakneck.commit import CreateItemsError
 from breakneck.plan import Plan, PlannedUnit, UnfixableSpot
 from breakneck.pourstitch import CoverageMap, Grid
-from breakneck.snapshot import Snapshot, ViaSize
+from breakneck.snapshot import NM_PER_MM, Snapshot, ViaSize
 
 D = 2.5
 
@@ -164,6 +168,7 @@ class ImageBoard:
 
     def remove_items(self, items):
         self.calls.append(("remove_items", len(items)))
+        self.removed = list(items)
 
     def push_commit(self, c, message=""):
         self.calls.append(("push_commit", message))
@@ -180,9 +185,44 @@ def image(tmp_path: Path) -> overlay.OverlayImage:
     )
 
 
+PLACEMENT = overlay.image_placement((1, 2), (10, 10), 0.1)
+
+
 class Existing:
-    def __init__(self, layer):
+    """A reference image as kipy reports it."""
+
+    def __init__(self, layer, centre=PLACEMENT.centre, scale=PLACEMENT.scale):
         self.layer = layer
+        self.position = Vector2.from_xy(
+            round(centre[0] * NM_PER_MM), round(centre[1] * NM_PER_MM)
+        )
+        self.image_scale = scale
+
+
+@pytest.mark.parametrize(
+    "existing, ours",
+    [
+        (Existing(BL.BL_User_1), True),
+        (Existing(BL.BL_User_1, (PLACEMENT.centre[0] + 0.0005, 2.5)), True),
+        (Existing(BL.BL_User_1, (PLACEMENT.centre[0] + 0.01, 2.5)), False),
+        (Existing(BL.BL_User_1, scale=2.0), False),
+        (Existing(BL.BL_Cmts_User), False),
+    ],
+)
+def test_only_images_at_the_overlay_placement_are_breakneck_overlays(existing, ours):
+    assert overlay.is_overlay(existing, PLACEMENT, ("User.1", "User.2")) is ours  # type: ignore[arg-type]
+
+
+def test_overlay_placement_follows_the_board_outline_raster():
+    bounds = (1.0, 2.0, 2.04, 3.0)  # 10.4 pixels wide rounds up to 11
+
+    placement = overlay.board_placement(bounds)
+
+    assert placement == overlay.image_placement((1.0, 2.0), (11, 10), 0.1)
+    grid = Grid.covering(bounds)
+    assert placement == overlay.image_placement(
+        (grid.x0, grid.y0), (grid.width, grid.height), grid.pixel
+    )
 
 
 def test_place_overlays_replaces_images_in_one_commit(tmp_path, monkeypatch):
@@ -190,7 +230,10 @@ def test_place_overlays_replaces_images_in_one_commit(tmp_path, monkeypatch):
     monkeypatch.setattr(
         overlay, "create_checked", lambda board, items: created.extend(items)
     )
-    board = ImageBoard(existing=[Existing(BL.BL_User_1), Existing(BL.BL_Cmts_User)])
+    users_own = Existing(BL.BL_User_1, (30, 30))
+    board = ImageBoard(
+        existing=[Existing(BL.BL_User_1), Existing(BL.BL_Cmts_User), users_own]
+    )
 
     assert overlay.place_overlays(board, [image(tmp_path)], ("User.1", "User.2"))  # type: ignore[arg-type]
 
@@ -199,6 +242,7 @@ def test_place_overlays_replaces_images_in_one_commit(tmp_path, monkeypatch):
         ("remove_items", 1),
         ("push_commit", overlay.OVERLAY_COMMIT),
     ]
+    assert board.removed == [board.existing[0]]
     (ref,) = created
     assert ref.layer == BL.BL_User_1
     assert (ref.position.x, ref.position.y) == (1_500_000, 2_500_000)
@@ -216,3 +260,66 @@ def test_refused_overlay_falls_back_to_manual_placement(tmp_path, monkeypatch):
     assert not overlay.place_overlays(board, [image(tmp_path)], ("User.1",))  # type: ignore[arg-type]
 
     assert board.calls == ["begin_commit", "drop_commit"]
+
+
+class ClearBoard:
+    """A board with an Edge.Cuts outline, Eco2 markers and reference images."""
+
+    def __init__(self, outline, images):
+        self.shapes = [*outline, eco2_shape()]
+        self.images = images
+        self.removed: list = []
+
+    def get_shapes(self):
+        return self.shapes
+
+    def get_reference_images(self):
+        return self.images
+
+    def begin_commit(self):
+        return "c"
+
+    def remove_items(self, items):
+        self.removed += items
+
+    def push_commit(self, c, message=""):
+        pass
+
+
+def segment(layer, start, end):
+    seg = BoardSegment()
+    seg.layer = layer
+    seg.start = Vector2.from_xy(
+        round(start[0] * NM_PER_MM), round(start[1] * NM_PER_MM)
+    )
+    seg.end = Vector2.from_xy(round(end[0] * NM_PER_MM), round(end[1] * NM_PER_MM))
+    return seg
+
+
+def eco2_shape():
+    return segment(BL.BL_Eco2_User, (1, 1), (2, 2))
+
+
+def rectangle_outline(x0, y0, x1, y1):
+    corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)]
+    return [segment(BL.BL_Edge_Cuts, a, b) for a, b in pairwise(corners)]
+
+
+def test_clear_removes_breakneck_overlays_and_keeps_other_images(monkeypatch):
+    bounds = (0.0, 0.0, 30.0, 20.0)
+    placement = overlay.board_placement(bounds)
+    ours = Existing(BL.BL_User_2, placement.centre, placement.scale)
+    users_own = Existing(BL.BL_User_1, (5, 5), 1.0)
+    board = ClearBoard(rectangle_outline(*bounds), [ours, users_own])
+    monkeypatch.setattr(
+        cli.kipy, "KiCad", lambda: type("K", (), {"get_board": lambda self: board})()
+    )
+
+    args = argparse.Namespace(
+        overlay_layers=list(overlay.DEFAULT_OVERLAY_LAYERS), dry_run=False
+    )
+    cli.execute_clear(args)
+
+    assert ours in board.removed
+    assert users_own not in board.removed
+    assert any(getattr(s, "layer", None) == BL.BL_Eco2_User for s in board.removed)

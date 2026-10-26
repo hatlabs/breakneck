@@ -27,7 +27,7 @@ from breakneck.returnvia import (
     plan_return_vias,
     return_lines,
 )
-from breakneck.snapshot import Snapshot, ViaSize
+from breakneck.snapshot import Snapshot, ViaSize, read_edge_paths
 
 
 def break_tracks(
@@ -378,14 +378,14 @@ def parse_args():
 
     clear_parser = subparsers.add_parser(
         "clear",
-        help="Remove annotations from User.Eco2 and overlay images",
+        help="Remove annotations from User.Eco2 and breakneck's overlay images",
     )
     clear_parser.add_argument(
         "--overlay-layers",
         nargs="+",
         metavar="LAYER",
         default=list(DEFAULT_OVERLAY_LAYERS),
-        help="User layers whose reference images are breakneck overlays",
+        help="User layers to remove breakneck overlays from",
     )
     returnvia_parser = subparsers.add_parser(
         "returnvia", help="Place a ground return via near every signal via"
@@ -423,7 +423,16 @@ def execute_clear(args):
 
     shapes = board.get_shapes()
     eco2_shapes = [shape for shape in shapes if shape.layer == BL.BL_Eco2_User]
-    images = breakneck.overlay.images_on(board, args.overlay_layers)
+    outline = Snapshot(copper_layers=(), edge_paths=read_edge_paths(shapes))
+    images = (
+        []
+        if outline.board_outline.is_empty
+        else breakneck.overlay.overlays_on(
+            board,
+            args.overlay_layers,
+            breakneck.overlay.board_placement(outline.board_outline.bounds),
+        )
+    )
 
     if not eco2_shapes and not images:
         logger.info("Nothing to clear")

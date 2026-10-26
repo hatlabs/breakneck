@@ -127,9 +127,7 @@ def execute(
     if outputs.overlay_dir is not None:
         pngs = render.write_overlays(outputs.overlay_dir, maps, options.distance)
         layers = overlay.layer_map(snapshot.copper_layers, outputs.overlay_layers)
-        placement = overlay.image_placement(
-            (grid.x0, grid.y0), (grid.width, grid.height), grid.pixel
-        )
+        placement = overlay.board_placement(snapshot.board_outline.bounds, grid.pixel)
         images = [
             overlay.OverlayImage(L, layers[L], path, placement)
             for L, path in pngs.items()
