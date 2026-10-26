@@ -2,7 +2,7 @@
 name = "breakneck"
 version = "0.3.0"
 authors = [{ name = "Matti Airas", email = "matti.airas@hatlabs.fi" }]
-description = "Stitching via visualization and manual forced neckdowns for KiCad"
+description = "DRC-checked placement of return, pad and pour stitching vias, via visualization and manual neckdowns for KiCad"
 readme = "README.md"
 requires-python = ">=3.11"
 classifiers = [
