@@ -71,7 +71,7 @@ def _vec(p: Point2) -> Vector2:
     return Vector2.from_xy(_nm(p[0]), _nm(p[1]))
 
 
-def _segment(start: Point2, end: Point2) -> kipy.board_types.BoardSegment:
+def eco2_segment(start: Point2, end: Point2) -> kipy.board_types.BoardSegment:
     shape = base_types_pb2.GraphicShape(
         segment=base_types_pb2.GraphicSegmentAttributes(
             start=_vec(start).proto, end=_vec(end).proto
@@ -91,7 +91,7 @@ def marker_items(markers: Sequence[Marker]) -> list[kipy.board_types.BoardSegmen
         x, y = m.position
         h = MARKER_HALF_SIZE
         for (ax, ay), (bx, by) in _GLYPHS[m.kind]:
-            out.append(_segment((x + ax * h, y + ay * h), (x + bx * h, y + by * h)))
+            out.append(eco2_segment((x + ax * h, y + ay * h), (x + bx * h, y + by * h)))
     return out
 
 

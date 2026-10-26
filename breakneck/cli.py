@@ -5,14 +5,11 @@ from pathlib import Path
 import kipy.board
 import kipy.board_types
 from kipy.board import BoardLayer as BL
-from kipy.geometry import Vector2
-from kipy.proto.board import board_types_pb2
-from kipy.proto.common import base_types_pb2
 from loguru import logger
 
 import breakneck.footprint
 import breakneck.overlay
-from breakneck.commit import Marker, MarkerKind, marker_items
+from breakneck.commit import Marker, MarkerKind, eco2_segment, marker_items
 from breakneck.overlay import DEFAULT_OVERLAY_LAYERS
 from breakneck.placement import RunSettings, run_placement
 from breakneck.returnvia import (
@@ -21,9 +18,7 @@ from breakneck.returnvia import (
     plan_return_vias,
     return_lines,
 )
-from breakneck.snapshot import NM_PER_MM, Point2, Snapshot, ViaSize
-
-GNDVIA_LINE_WIDTH = 0.1
+from breakneck.snapshot import Snapshot, ViaSize
 
 
 def break_tracks(
@@ -151,24 +146,6 @@ def execute_cut(args):
     break_tracks(board, bnfootprints, tracks, dry_run=args.dry_run)
 
 
-def _nm_vector(p: Point2) -> Vector2:
-    return Vector2.from_xy(round(p[0] * NM_PER_MM), round(p[1] * NM_PER_MM))
-
-
-def _eco2_line(start: Point2, end: Point2) -> kipy.board_types.BoardSegment:
-    shape = base_types_pb2.GraphicShape(
-        segment=base_types_pb2.GraphicSegmentAttributes(
-            start=_nm_vector(start).proto, end=_nm_vector(end).proto
-        )
-    )
-    segment = kipy.board_types.BoardSegment(
-        proto=board_types_pb2.BoardGraphicShape(shape=shape)
-    )
-    segment.layer = BL.BL_Eco2_User
-    segment.attributes.stroke.width = round(GNDVIA_LINE_WIDTH * NM_PER_MM)
-    return segment
-
-
 def execute_gndvia_check(args):
     """Draw a User.Eco2 line from each via lacking a return to its nearest one.
 
@@ -184,7 +161,7 @@ def execute_gndvia_check(args):
         f"{len(lines) + len(unmarked)} vias without a return within "
         f"{args.distance} mm ({len(unmarked)} without a ground or any return)"
     )
-    items = [_eco2_line(a, b) for a, b in lines] + marker_items(
+    items = [eco2_segment(a, b) for a, b in lines] + marker_items(
         [Marker(p, MarkerKind.UNFIXABLE) for p in unmarked]
     )
 
