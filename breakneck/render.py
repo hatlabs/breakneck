@@ -1,9 +1,10 @@
-"""Pour-stitch distance heatmaps: a panel figure and per-layer overlay PNGs."""
+"""Distance heatmaps: a panel figure and per-layer overlay PNGs."""
 
 from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib
@@ -22,10 +23,6 @@ from breakneck.plan import Plan
 from breakneck.raster import CoverageMap, Grid
 from breakneck.snapshot import Snapshot
 
-COLORMAP = "viridis"
-OVER_COLOUR = "#ff2a6d"
-# Any value above the top of the colour scale is drawn in OVER_COLOUR.
-OVER_SCALE = 2.0
 BACKGROUND = "#101010"
 OUTLINE_COLOUR = "#888888"
 UNFIXABLE_COLOUR = "cyan"
@@ -37,10 +34,31 @@ PANEL_DPI = 100
 MARGIN_MM = 0.5
 
 
-def _colormap() -> matplotlib.colors.Colormap:
-    cmap = plt.get_cmap(COLORMAP).copy()
-    cmap.set_over(OVER_COLOUR)
+@dataclass(frozen=True)
+class HeatmapStyle:
+    """A command's look; `colourbar_label` may use `{distance}`.
+
+    Without an over colour, values above the scale saturate at its top.
+    Unreachable copper (infinite distance) has its own colour.
+    """
+
+    title: str
+    colourbar_label: str
+    png_prefix: str
+    colormap: str
+    over_colour: str | None
+    unreachable_colour: str
+
+
+def _colormap(style: HeatmapStyle) -> matplotlib.colors.Colormap:
+    cmap = plt.get_cmap(style.colormap).copy()
+    if style.over_colour is not None:
+        cmap.set_over(style.over_colour)
     return cmap
+
+
+def _rgba_bytes(colour: str) -> npt.NDArray[np.uint8]:
+    return np.round(matplotlib.colors.to_rgba_array(colour)[0] * 255).astype(np.uint8)
 
 
 def _same(a: CoverageMap, b: CoverageMap) -> bool:
@@ -73,6 +91,7 @@ def render_panels(
     maps: Sequence[CoverageMap],
     plan: Plan,
     distance: float,
+    style: HeatmapStyle,
 ) -> None:
     shown = panels(maps)
     if not shown:
@@ -89,24 +108,31 @@ def render_panels(
         squeeze=False,
     )
     fig.patch.set_facecolor(BACKGROUND)
-    cmap = _colormap()
+    cmap = _colormap(style)
     grey = matplotlib.colors.ListedColormap([UNSTITCHABLE_COLOUR])
+    unreachable = matplotlib.colors.ListedColormap([style.unreachable_colour])
     image = None
     for ax in axs.ravel()[len(shown) :]:
         ax.set_visible(False)
     for ax, (m, twins) in zip(axs.ravel(), shown):
         ax.set_facecolor(BACKGROUND)
         extent = (x0, x1, y1, y0)
-        # imshow draws non-finite values as background; copper no stitch
-        # reaches (inf) belongs in the over colour.
-        shown_distance = np.where(
-            np.isinf(m.distance), OVER_SCALE * distance, m.distance
-        )
+        # imshow draws non-finite values as background, so copper no seed
+        # reaches (inf) gets a layer of its own.
+        lost = np.isinf(m.distance) & ~m.unstitchable
         image = ax.imshow(
-            np.ma.masked_where(m.unstitchable | np.isnan(m.distance), shown_distance),
+            np.ma.masked_where(
+                m.unstitchable | lost | np.isnan(m.distance), m.distance
+            ),
             cmap=cmap,
             vmin=0,
             vmax=distance,
+            extent=extent,
+            interpolation="nearest",
+        )
+        ax.imshow(
+            np.ma.masked_where(~lost, lost),
+            cmap=unreachable,
             extent=extent,
             interpolation="nearest",
         )
@@ -144,21 +170,18 @@ def render_panels(
     cb = fig.colorbar(
         image, ax=axs, orientation="horizontal", fraction=0.03, pad=0.03, extend="max"
     )
-    cb.set_label(
-        f"distance to nearest stitch through the copper (mm); pink > {distance:g} mm",
-        color="white",
-    )
+    cb.set_label(style.colourbar_label.format(distance=distance), color="white")
     cb.ax.tick_params(colors="white")
-    fig.suptitle(
-        "Pour stitching: filled = planned via, ring = existing via, "
-        "cyan x = no via fits, grey = out of reach of any two-layer spot",
-        color="white",
-    )
+    fig.suptitle(style.title, color="white")
     fig.savefig(path, dpi=PANEL_DPI, facecolor=fig.get_facecolor(), bbox_inches="tight")
     plt.close(fig)
 
 
-def overlay_rgba(maps: Sequence[CoverageMap], distance: float) -> npt.NDArray[np.uint8]:
+def overlay_rgba(
+    maps: Sequence[CoverageMap],
+    distance: float,
+    style: HeatmapStyle,
+) -> npt.NDArray[np.uint8]:
     """Composite heatmap of one layer's pours; transparent outside copper.
 
     A layer's pours of different nets don't overlap, so later maps only fill
@@ -166,31 +189,34 @@ def overlay_rgba(maps: Sequence[CoverageMap], distance: float) -> npt.NDArray[np
     """
     shape = maps[0].distance.shape
     rgba = np.zeros((*shape, 4), np.uint8)
-    cmap = _colormap()
+    cmap = _colormap(style)
     norm = matplotlib.colors.Normalize(vmin=0, vmax=distance)
-    grey = matplotlib.colors.to_rgba_array(UNSTITCHABLE_COLOUR)[0]
     for m in maps:
         inside = ~np.isnan(m.distance)
         colours = cmap(norm(np.where(inside, m.distance, 0)), bytes=True)
         rgba[inside] = colours[inside]
-        rgba[m.unstitchable] = np.round(grey * 255).astype(np.uint8)
+        rgba[np.isinf(m.distance)] = _rgba_bytes(style.unreachable_colour)
+        rgba[m.unstitchable] = _rgba_bytes(UNSTITCHABLE_COLOUR)
     return rgba
 
 
 def write_overlays(
-    out_dir: Path, maps: Sequence[CoverageMap], distance: float
+    out_dir: Path,
+    maps: Sequence[CoverageMap],
+    distance: float,
+    style: HeatmapStyle,
 ) -> dict[str, Path]:
-    """One overlay PNG per copper layer that has stitched pours."""
+    """One overlay PNG per copper layer that has maps."""
     out_dir.mkdir(parents=True, exist_ok=True)
     by_layer: dict[str, list[CoverageMap]] = {}
     for m in maps:
         by_layer.setdefault(m.layer, []).append(m)
     paths = {}
     for layer, layer_maps in by_layer.items():
-        path = out_dir / f"pourstitch-{layer.replace('.', '_')}.png"
+        path = out_dir / f"{style.png_prefix}-{layer.replace('.', '_')}.png"
         matplotlib.image.imsave(
             path,
-            overlay_rgba(layer_maps, distance),
+            overlay_rgba(layer_maps, distance, style),
             dpi=OVERLAY_PPI,
             metadata=dict([OVERLAY_TAG]),
         )

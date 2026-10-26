@@ -10,13 +10,14 @@ from kipy.proto.board.board_types_pb2 import BoardLayer as BL
 from PIL import Image
 from shapely.geometry import box
 
-from breakneck import cli, overlay, render
+from breakneck import cli, overlay, pourstitch_command, render
 from breakneck.commit import CreateItemsError
 from breakneck.plan import Plan, PlannedUnit, UnfixableSpot
 from breakneck.raster import CoverageMap, Grid
 from breakneck.snapshot import NM_PER_MM, Snapshot, ViaSize
 
 D = 2.5
+STYLE = pourstitch_command.STYLE
 
 
 def coverage(net, layer, dist, unstitchable=None):
@@ -72,7 +73,7 @@ def test_overlay_image_has_raster_size_and_transparent_background(tmp_path: Path
     b[:, 30:] = np.inf
     maps = maps_for({"F.Cu": [("GND", a), ("+3.3V", b)]})
 
-    paths = render.write_overlays(tmp_path, maps, D)
+    paths = render.write_overlays(tmp_path, maps, D, STYLE)
 
     img = Image.open(paths["F.Cu"])
     assert img.size == (50, 30)
@@ -90,7 +91,9 @@ def test_unstitchable_copper_is_grey_not_pink(tmp_path: Path):
     unstitchable[:, 5:] = True
     maps = [coverage("GND", "F.Cu", dist, unstitchable)]
 
-    rgba = np.asarray(Image.open(render.write_overlays(tmp_path, maps, D)["F.Cu"]))
+    rgba = np.asarray(
+        Image.open(render.write_overlays(tmp_path, maps, D, STYLE)["F.Cu"])
+    )
 
     assert tuple(rgba[0, 0, :3]) == (0xFF, 0x2A, 0x6D)
     grey = render.matplotlib.colors.to_rgb(render.UNSTITCHABLE_COLOUR)
@@ -112,7 +115,7 @@ def test_one_overlay_per_copper_layer(tmp_path: Path):
     a = np.zeros((4, 4))
     maps = maps_for({"In1.Cu": [("GND", a)], "In2.Cu": [("GND", a)]})
 
-    assert set(render.write_overlays(tmp_path, maps, D)) == {"In1.Cu", "In2.Cu"}
+    assert set(render.write_overlays(tmp_path, maps, D, STYLE)) == {"In1.Cu", "In2.Cu"}
 
 
 def test_identical_layers_share_a_panel():
@@ -148,7 +151,7 @@ def test_render_panels_writes_png(tmp_path: Path):
     unstitchable[:, 25:] = True
     maps = [coverage("GND", "F.Cu", dist, unstitchable)]
 
-    render.render_panels(out, snap, grid, maps, plan, D)
+    render.render_panels(out, snap, grid, maps, plan, D, STYLE)
 
     assert Image.open(out).size[0] > 0
 
@@ -164,11 +167,59 @@ def test_render_panels_paints_unreached_copper_pink(tmp_path: Path):
     maps = [coverage("GND", "F.Cu", np.full((20, 30), np.inf))]
     out = tmp_path / "heat.png"
 
-    render.render_panels(out, snap, grid, maps, Plan(units=(), unfixable=()), D)
+    render.render_panels(out, snap, grid, maps, Plan(units=(), unfixable=()), D, STYLE)
 
     pixels = np.asarray(Image.open(out).convert("RGB")).reshape(-1, 3)
-    pink = tuple(int(render.OVER_COLOUR[i : i + 2], 16) for i in (1, 3, 5))
+    pink = tuple(int(pourstitch_command.OVER_COLOUR[i : i + 2], 16) for i in (1, 3, 5))
     assert (np.abs(pixels.astype(int) - pink).sum(axis=1) < 10).sum() > 5000
+
+
+OTHER_STYLE = render.HeatmapStyle(
+    title="Other",
+    colourbar_label="mm; cap {distance:g}",
+    png_prefix="other",
+    colormap="magma",
+    over_colour=None,
+    unreachable_colour="#00ff00",
+)
+
+
+def rgb(colour):
+    return tuple(round(c * 255) for c in render.matplotlib.colors.to_rgb(colour))
+
+
+def test_style_sets_overlay_prefix_and_colours(tmp_path: Path):
+    dist = np.array([[0.0, 2 * D, np.inf, np.nan]])
+    maps = [coverage("GND", "In1.Cu", dist)]
+
+    paths = render.write_overlays(tmp_path, maps, D, OTHER_STYLE)
+
+    assert paths["In1.Cu"].name == "other-In1_Cu.png"
+    rgba = np.asarray(Image.open(paths["In1.Cu"]).convert("RGBA"))
+    magma = render.plt.get_cmap("magma")
+    assert tuple(rgba[0, 0, :3]) == tuple(magma(0.0, bytes=True)[:3])
+    # Without an over colour, values above the scale saturate at its top.
+    assert tuple(rgba[0, 1, :3]) == tuple(magma(1.0, bytes=True)[:3])
+    assert tuple(rgba[0, 2, :3]) == rgb("#00ff00")
+    assert rgba[0, 3, 3] == 0
+
+
+def test_render_panels_paints_unreached_copper_in_the_style_colour(tmp_path: Path):
+    snap = Snapshot(
+        copper_layers=("F.Cu", "B.Cu"),
+        edge_paths=[list(box(0, 0, 3, 2).exterior.coords)],  # type: ignore[list-item]
+    )
+    grid = Grid(0, 0, 30, 20)
+    maps = [coverage("GND", "F.Cu", np.full((20, 30), np.inf))]
+    out = tmp_path / "heat.png"
+
+    render.render_panels(
+        out, snap, grid, maps, Plan(units=(), unfixable=()), D, OTHER_STYLE
+    )
+
+    pixels = np.asarray(Image.open(out).convert("RGB")).reshape(-1, 3)
+    green = rgb("#00ff00")
+    assert (np.abs(pixels.astype(int) - green).sum(axis=1) < 10).sum() > 5000
 
 
 class ImageBoard:
@@ -242,7 +293,7 @@ def png(path: Path, metadata: dict[str, str]) -> bytes:
 def test_written_overlays_carry_the_breakneck_tag(tmp_path: Path):
     maps = [coverage("GND", "F.Cu", np.zeros((3, 3)))]
 
-    data = render.write_overlays(tmp_path, maps, D)["F.Cu"].read_bytes()
+    data = render.write_overlays(tmp_path, maps, D, STYLE)["F.Cu"].read_bytes()
 
     key, value = overlay.OVERLAY_TAG
     assert overlay.png_text(data)[key] == value
@@ -294,12 +345,14 @@ def test_place_overlays_replaces_images_in_one_commit(tmp_path, monkeypatch):
         existing=[Existing(BL.BL_User_1), Existing(BL.BL_Cmts_User), users_own]
     )
 
-    assert overlay.place_overlays(board, [image(tmp_path)], ("User.1", "User.2"))  # type: ignore[arg-type]
+    assert overlay.place_overlays(
+        board, [image(tmp_path)], ("User.1", "User.2"), "label"
+    )  # type: ignore[arg-type]
 
     assert board.calls == [
         "begin_commit",
         ("remove_items", 1),
-        ("push_commit", overlay.OVERLAY_COMMIT),
+        ("push_commit", "label"),
     ]
     assert board.removed == [board.existing[0]]
     (ref,) = created
@@ -309,6 +362,15 @@ def test_place_overlays_replaces_images_in_one_commit(tmp_path, monkeypatch):
     assert ref.image_data == b"png"
 
 
+def test_place_overlays_commits_under_the_given_label(tmp_path, monkeypatch):
+    monkeypatch.setattr(overlay, "create_checked", lambda board, items: None)
+    board = ImageBoard()
+
+    overlay.place_overlays(board, [image(tmp_path)], ("User.1",), "other overlay")  # type: ignore[arg-type]
+
+    assert board.calls == ["begin_commit", ("push_commit", "other overlay")]
+
+
 def test_refused_overlay_falls_back_to_manual_placement(tmp_path, monkeypatch):
     def refuse(board, items):
         raise CreateItemsError("no overlapping layers")
@@ -316,7 +378,7 @@ def test_refused_overlay_falls_back_to_manual_placement(tmp_path, monkeypatch):
     monkeypatch.setattr(overlay, "create_checked", refuse)
     board = ImageBoard()
 
-    assert not overlay.place_overlays(board, [image(tmp_path)], ("User.1",))  # type: ignore[arg-type]
+    assert not overlay.place_overlays(board, [image(tmp_path)], ("User.1",), "label")  # type: ignore[arg-type]
 
     assert board.calls == ["begin_commit", "drop_commit"]
 

@@ -19,6 +19,21 @@ from breakneck.raster import CoverageMap, Grid
 from breakneck.snapshot import Snapshot
 
 COMMAND = "pourstitch"
+OVERLAY_COMMIT = "breakneck pourstitch overlay"
+OVER_COLOUR = "#ff2a6d"
+STYLE = render.HeatmapStyle(
+    title=(
+        "Pour stitching: filled = planned via, ring = existing via, "
+        "cyan x = no via fits, grey = out of reach of any two-layer spot"
+    ),
+    colourbar_label=(
+        "distance to nearest stitch through the copper (mm); pink > {distance:g} mm"
+    ),
+    png_prefix="pourstitch",
+    colormap="viridis",
+    over_colour=OVER_COLOUR,
+    unreachable_colour=OVER_COLOUR,
+)
 
 
 @dataclass(frozen=True)
@@ -121,12 +136,12 @@ def execute(
 
     if outputs.render is not None:
         render.render_panels(
-            outputs.render, snapshot, grid, maps, plan, options.distance
+            outputs.render, snapshot, grid, maps, plan, options.distance, STYLE
         )
         logger.info(f"Wrote {outputs.render}")
 
     if outputs.overlay_dir is not None:
-        pngs = render.write_overlays(outputs.overlay_dir, maps, options.distance)
+        pngs = render.write_overlays(outputs.overlay_dir, maps, options.distance, STYLE)
         layers = overlay.layer_map(snapshot.copper_layers, outputs.overlay_layers)
         placement = overlay.board_placement(snapshot.board_outline.bounds, grid.pixel)
         images = [
@@ -134,7 +149,9 @@ def execute(
             for L, path in pngs.items()
         ]
         if place_overlay and images:
-            overlay.place_overlays(board, images, outputs.overlay_layers)
+            overlay.place_overlays(
+                board, images, outputs.overlay_layers, OVERLAY_COMMIT
+            )
         else:
             for i in images:
                 logger.info(f"Overlay not placed: {i.describe()}")
