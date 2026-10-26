@@ -302,7 +302,7 @@ def test_other_net_outer_pour_pulls_back_around_new_vias():
 PIXEL_MM2 = 0.01
 
 
-def front_only_snapshot(front_only, joined=True):
+def front_only_snapshot(front_only, joined=True, board=None):
     """A two-layer GND pour plus F.Cu-only GND copper.
 
     With `joined`, the F.Cu-only part touches the two-layer pour's F.Cu fill;
@@ -317,7 +317,7 @@ def front_only_snapshot(front_only, joined=True):
     return Snapshot(
         copper_layers=TWO_LAYERS,
         zones=zones,
-        edge_paths=outline_paths(box(0, 0, 20, 10)),
+        edge_paths=outline_paths(board or box(0, 0, 20, 10)),
         via_sizes={NET: VIA},
     )
 
@@ -353,3 +353,23 @@ def test_front_only_copper_joined_to_a_stitchable_pour_stays_stitchable():
     m = front_map(stitcher, snap)
 
     assert not m.unstitchable.any()
+
+
+def test_front_only_copper_beyond_reach_of_a_two_layer_spot_is_unstitchable():
+    # A local F.Cu zone joined to the two-layer pour through a long neck: no
+    # via in the two-layer part reaches its far end through the copper.
+    neck = box(10, 4.5, 18, 5.5)
+    blob = box(18, 2, 26, 8)
+    snap = front_only_snapshot(neck.union(blob), board=box(0, 0, 30, 10))
+    stitcher = PourStitcher()
+    grid = stitcher.grid(snap, options())
+
+    m = front_map(stitcher, snap)
+
+    assert not m.unstitchable[grid.index((11, 5))]  # within D of the pour
+    assert m.unstitchable[grid.index((14, 5))]
+    assert m.unstitchable[grid.index((22, 5))]
+    assert not m.unstitchable[grid.index((5, 5))]
+    grey_mm2 = m.unstitchable.sum() * PIXEL_MM2
+    expected = blob.area + (18 - 10 - D) * 1.0
+    assert grey_mm2 == pytest.approx(expected, rel=0.05)

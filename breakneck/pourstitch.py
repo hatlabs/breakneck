@@ -58,8 +58,6 @@ THERMAL_REACH = 0.4
 LATTICE_WINDOW = 0.6
 # A new via only shortens distances near it; bounding the update keeps it fast.
 UPDATE_REACH_FACTOR = 3
-# Fill islands are 8-connected, as the geodesic distance moves diagonally.
-ISLAND_CONNECTIVITY = np.ones((3, 3), bool)
 UNREACHABLE = 1e6
 FAR = 1e9
 COORD_DECIMALS = 3
@@ -176,13 +174,6 @@ class Grid:
         return _edt(mask) * np.float32(self.pixel)
 
 
-def _islands(mask: BoolMap) -> npt.NDArray[np.int32]:
-    """Label each 8-connected island of True pixels; 0 elsewhere."""
-    labelled = ndimage.label(mask, structure=ISLAND_CONNECTIVITY)
-    assert isinstance(labelled, tuple)
-    return np.asarray(labelled[0], np.int32)
-
-
 def _edt(mask: BoolMap) -> FloatMap:
     """Pixel distance from each True pixel to the nearest False pixel."""
     return np.asarray(ndimage.distance_transform_edt(mask), dtype=np.float32)
@@ -214,7 +205,7 @@ class CoverageMap:
     """Distance (mm) through `net`'s fill on `layer` to the nearest stitch.
 
     NaN outside the fill, inf where no stitch reaches. `unstitchable` marks
-    fill no via could ever join (see `_Context.unstitchable`).
+    fill no via could ever bring within D (see `_Context.unstitchable`).
     """
 
     net: str
@@ -269,26 +260,27 @@ class _Context:
 
     @cached_property
     def unstitchable(self) -> dict[tuple[str, str], BoolMap]:
-        """Fill per net and layer that no stitch can ever join.
+        """Fill per net and layer that no stitch can ever bring within D.
 
-        Judged per fill island, not per pixel: an island is stitchable if any
-        pixel of it passes the zone-layer rule (the net's zone outlines cover
-        two or more layers there, all filled) or an existing stitch touches
-        it. A via anywhere in the island reaches all of it through the
-        copper, so per-pixel judgement would grey out stitchable edges. A
-        typical unstitchable island is a local zone on one layer whose other
-        side is another net's pour.
+        A pixel is unstitchable when, through the net's copper on its layer,
+        it is farther than D from every spot that passes the zone-layer rule
+        (the net's zone outlines cover two or more layers there, all filled)
+        and from every existing stitch. Other-net clearances are ignored:
+        a spot they block is uncovered, not unstitchable. Reach through the
+        copper, not fill islands, decides: a one-layer local zone joined to
+        a two-layer pour by a long neck is out of reach beyond the neck's
+        first D, though it is one island with the pour.
         """
+        d = self.options.distance
         out = {}
         for net in self.nets:
             joinable = self._joinable(net)
             seeds = self.stitch_seeds(net)
             for L in self.layers[net]:
                 fill = self.fill[(net, L)]
-                islands = _islands(fill)
-                touched = np.array([islands[px] for px in seeds[L]], islands.dtype)
-                reached = np.union1d(islands[joinable], touched)
-                out[(net, L)] = fill & ~np.isin(islands, reached)
+                starts = [(int(r), int(c)) for r, c in np.argwhere(joinable & fill)]
+                starts += seeds[L]
+                out[(net, L)] = fill & (self.geodesic(net, L, starts, limit=d) > d)
         return out
 
     def _joinable(self, net: str) -> BoolMap:
@@ -682,7 +674,7 @@ def summarise(
     maps: Sequence[CoverageMap], distance: float, pixel: float
 ) -> list[LayerCoverage]:
     """Stitchable fill area per net and layer farther than `distance` from a
-    stitch, and the fill area no stitch can join."""
+    stitch, and the fill area no stitch can bring within it."""
     out = []
     area = pixel * pixel
     for m in maps:

@@ -27,7 +27,7 @@ OVER_COLOUR = "#ff2a6d"
 BACKGROUND = "#101010"
 OUTLINE_COLOUR = "#888888"
 UNFIXABLE_COLOUR = "cyan"
-# Neutral, so copper no via can join reads apart from the distance scale.
+# Neutral, so copper no via can reach reads apart from the distance scale.
 UNSTITCHABLE_COLOUR = "#a0a0a0"
 PANEL_COLUMNS = 2
 PANEL_INCHES = 8
@@ -144,7 +144,7 @@ def render_panels(
     cb.ax.tick_params(colors="white")
     fig.suptitle(
         "Pour stitching: filled = planned via, ring = existing via, "
-        "cyan x = no via fits, grey = no via can join (fill on one layer)",
+        "cyan x = no via fits, grey = out of reach of any two-layer spot",
         color="white",
     )
     fig.savefig(path, dpi=PANEL_DPI, facecolor=fig.get_facecolor(), bbox_inches="tight")

@@ -59,7 +59,7 @@ def _log_coverage(
     counts = stitcher.stitch_counts(snapshot, options)
     for c in summarise(maps, options.distance, grid.pixel):
         unstitchable = (
-            f"; {c.unstitchable_mm2:.2f} mm² can't be stitched (fill on one layer)"
+            f"; {c.unstitchable_mm2:.2f} mm² can't be stitched (no two-layer spot within reach)"
             if c.unstitchable_mm2
             else ""
         )
