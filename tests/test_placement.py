@@ -472,13 +472,26 @@ def test_push_timeout_keeps_the_commit_and_warns(log):
     commit.commit_units(FakeKiCad(board), board, "x", [unit(1, 1)], [])  # type: ignore[arg-type]
 
     assert "drop_commit" not in board.calls
-    assert any(line.startswith("WARNING") and "undo" in line for line in log)
+    assert any(
+        line.startswith("WARNING") and "lost the connection" in line and "undo" in line
+        for line in log
+    )
 
 
-def test_push_failure_is_raised_without_dropping_the_commit():
+def test_push_refused_by_kicad_drops_the_commit_and_raises():
+    # An ApiError is KiCad's answer: nothing landed, so the commit is dropped.
     board = PushFailingBoard(ApiError("bad", code=ApiStatusCode.AS_BAD_REQUEST))
 
     with pytest.raises(ApiError):
+        commit.commit_units(FakeKiCad(board), board, "x", [unit(1, 1)], [])  # type: ignore[arg-type]
+
+    assert board.calls[-1] == "drop_commit"
+
+
+def test_push_failing_otherwise_is_raised_without_dropping_the_commit():
+    board = PushFailingBoard(RuntimeError("unexpected"))
+
+    with pytest.raises(RuntimeError):
         commit.commit_units(FakeKiCad(board), board, "x", [unit(1, 1)], [])  # type: ignore[arg-type]
 
     assert "drop_commit" not in board.calls

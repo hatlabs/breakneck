@@ -182,14 +182,20 @@ def commit_units(
         raise
 
     # Outside the try above: once pushed, the commit can't be dropped, and a
-    # client timeout doesn't mean KiCad didn't land it.
+    # lost or timed-out connection doesn't mean KiCad didn't land it. An
+    # ApiError is KiCad's answer, so nothing landed and the commit is dropped.
     try:
         board.push_commit(commit, label)
     except KiCadConnectionError as e:
         logger.warning(
-            f"Committing '{label}' timed out over the API ({e}); it may have "
-            "landed. Check KiCad's undo history before running again"
+            f"Committing '{label}' timed out or lost the connection to KiCad "
+            f"({e}); it may have landed. Check KiCad's undo history before "
+            "running again"
         )
+    except ApiError as e:
+        logger.error(f"KiCad refused to commit '{label}': {e}")
+        board.drop_commit(commit)
+        raise
     except Exception as e:
         logger.error(f"Committing '{label}' failed: {e}")
         raise
