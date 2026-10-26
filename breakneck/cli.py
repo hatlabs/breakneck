@@ -1,16 +1,38 @@
 import argparse
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from pathlib import Path
 
 import kipy.board
 import kipy.board_types
-import shapely.geometry
 from kipy.board import BoardLayer as BL
-from kipy.proto.board import board_types_pb2
-from kipy.proto.common import base_types_pb2
 from loguru import logger
 
-import breakneck.conversions
 import breakneck.footprint
+import breakneck.overlay
+from breakneck.commit import Marker, MarkerKind, eco2_segment, marker_items
+from breakneck.overlay import DEFAULT_OVERLAY_LAYERS
+from breakneck.padvia import PadviaOptions, plan_padvia
+from breakneck.placement import (
+    BoardChangedError,
+    RunSettings,
+    SplitError,
+    run_placement,
+)
+from breakneck.plan import POURSTITCH_DISTANCE, POURSTITCH_FALLBACK_VIA
+from breakneck.returnvia import (
+    DEFAULT_DISTANCE,
+    NoGroundNetsError,
+    ReturnViaOptions,
+    plan_return_vias,
+    return_lines,
+)
+from breakneck.snapshot import (
+    Snapshot,
+    ViaSize,
+    outline_from_edge_paths,
+    read_edge_paths,
+)
 
 
 def break_tracks(
@@ -82,8 +104,7 @@ def execute_cut(args):
         sel_tracks = [
             item
             for item in items
-            if isinstance(item, kipy.board_types.Track)
-            or isinstance(item, kipy.board_types.ArcTrack)
+            if isinstance(item, (kipy.board_types.Track, kipy.board_types.ArcTrack))
         ]
 
         # get footprints from selection
@@ -116,7 +137,7 @@ def execute_cut(args):
 
     if args.netclass:
         nets = board.get_nets(args.netclass)
-        net_names = set(n.name for n in nets)
+        net_names = {n.name for n in nets}
         tracks = [t for t in tracks if t.net in net_names]
 
     num_tracks = len(tracks)
@@ -139,83 +160,154 @@ def execute_cut(args):
 
 
 def execute_gndvia_check(args):
-    max_distance = args.distance * 1000000  # mm to nm
+    """Draw a User.Eco2 line from each via lacking a return to its nearest one.
 
+    Vias outside every ground zone, or whose ground has no return at all,
+    get a marker instead.
+    """
     kicad = kipy.KiCad()
     board = kicad.get_board()
+    snapshot = Snapshot.from_board(board)
 
-    vias = board.get_vias()
+    with _exit_on(NoGroundNetsError):
+        lines, unmarked = return_lines(snapshot, args.ground_nets, args.distance)
+    logger.info(
+        f"{len(lines) + len(unmarked)} vias without a return within "
+        f"{args.distance} mm ({len(unmarked)} without a ground or any return)"
+    )
+    items = [eco2_segment(a, b) for a, b in lines] + marker_items(
+        [Marker(p, MarkerKind.UNFIXABLE) for p in unmarked]
+    )
 
-    all_pads = board.get_pads()
-    gnd_tht_pads = [
-        pad
-        for pad in all_pads
-        if pad.net.name == "GND" and pad.proto.type == kipy.board_types.PadType.PT_PTH
+    eco2_shapes = [
+        shape for shape in board.get_shapes() if shape.layer == BL.BL_Eco2_User
     ]
-
-    # We treat GND THT pads as vias as well
-    gnd_vias = [via for via in vias if via.net.name == "GND"] + gnd_tht_pads
-
-    gnd_via_coords = [
-        breakneck.conversions.as_coords2d(via.position) for via in gnd_vias
-    ]
-    gnd_via_points = [shapely.geometry.Point(coords) for coords in gnd_via_coords]
-
-    gnd_via_tree = shapely.STRtree(gnd_via_points)
-
-    non_gnd_vias = [via for via in vias if via.net.name != "GND"]
-    non_gnd_via_coords = [
-        breakneck.conversions.as_coords2d(via.position) for via in non_gnd_vias
-    ]
-    non_gnd_via_points = [
-        shapely.geometry.Point(coords) for coords in non_gnd_via_coords
-    ]
-
-    nearests_idxs = [gnd_via_tree.nearest(pt) for pt in non_gnd_via_points]
-
-    nearests = [gnd_via_points[idx] for idx in nearests_idxs]
-    distances = [
-        shapely.distance(nearest, non_gnd_via)
-        for nearest, non_gnd_via in zip(nearests, non_gnd_via_points)
-    ]
-
-    # Get those non-gnd vias that are more than 3000000 nm away from the nearest gnd via
-    lone_via_idxs = [
-        i for i, distance in enumerate(distances) if distance > max_distance
-    ]
-
-    new_lines = []
-    for idx in lone_via_idxs:
-        # Draw a line from the lone via to the nearest gnd via on layer BL.BL_Eco2_User
-        # with thickness 0.05mm = 50000 nm
-        ngvc = non_gnd_via_coords[idx]
-        gvc = gnd_via_coords[nearests_idxs[idx]]
-        start_proto_vector = base_types_pb2.Vector2(x_nm=ngvc[0], y_nm=-ngvc[1])
-        end_proto_vector = base_types_pb2.Vector2(x_nm=gvc[0], y_nm=-gvc[1])
-
-        shape = base_types_pb2.GraphicShape(
-            segment=base_types_pb2.GraphicSegmentAttributes(
-                start=start_proto_vector, end=end_proto_vector
-            )
-        )
-
-        board_graphic_shape = board_types_pb2.BoardGraphicShape(shape=shape)
-
-        segment = kipy.board_types.BoardSegment(proto=board_graphic_shape)
-        segment.layer = BL.BL_Eco2_User
-        segment.attributes.stroke.width = 100000
-        new_lines.append(segment)
-
-    shapes = board.get_shapes()
-    eco2_shapes = [shape for shape in shapes if shape.layer == BL.BL_Eco2_User]
 
     commit = board.begin_commit()
     board.remove_items(eco2_shapes)
-    board.create_items(new_lines)
+    if items:
+        board.create_items(items)
     if args.dry_run:
         board.drop_commit(commit)
     else:
         board.push_commit(commit)
+
+
+# Placement failures that leave the board untouched and need no traceback.
+PLACEMENT_ERRORS = (SplitError, BoardChangedError)
+
+
+@contextmanager
+def _exit_on(*errors: type[Exception]) -> Iterator[None]:
+    """Report an expected failure as one log line and exit 1."""
+    try:
+        yield
+    except errors as e:
+        logger.error(str(e))
+        raise SystemExit(1) from None
+
+
+def parse_via_size(text: str) -> ViaSize:
+    """Parse DIAMETER/DRILL in mm, e.g. 0.6/0.3."""
+    try:
+        dia, drill = (float(v) for v in text.split("/"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected DIAMETER/DRILL, got {text!r}")
+    if not 0 < drill < dia:
+        raise argparse.ArgumentTypeError(f"need 0 < drill < diameter, got {text!r}")
+    return ViaSize(dia, drill)
+
+
+def add_pourstitch_parser(subparsers) -> None:
+    p = subparsers.add_parser(
+        "pourstitch",
+        help="Stitch pours so every point is within a distance of a via",
+    )
+    p.add_argument(
+        "--nets", nargs="+", metavar="NET", required=True, help="Nets to stitch"
+    )
+    p.add_argument(
+        "--distance",
+        "-d",
+        type=float,
+        default=POURSTITCH_DISTANCE,
+        help="Maximum distance to a stitch, through the copper, in mm",
+    )
+    p.add_argument(
+        "--via",
+        type=parse_via_size,
+        metavar="DIAMETER/DRILL",
+        help="Via size in mm, overriding the net's netclass size",
+    )
+    p.add_argument(
+        "--fallback-via",
+        type=parse_via_size,
+        default=POURSTITCH_FALLBACK_VIA,
+        metavar="DIAMETER/DRILL",
+        help="Smaller via size in mm for spots the netclass size doesn't fit",
+    )
+    p.add_argument(
+        "--check",
+        action="store_true",
+        help="Only measure the existing stitching; place no vias",
+    )
+    p.add_argument(
+        "--render", type=Path, metavar="PATH", help="Write the heatmap panels to PATH"
+    )
+    p.add_argument(
+        "--overlay",
+        nargs="?",
+        type=Path,
+        const=Path("."),
+        metavar="DIR",
+        help="Write per-layer heatmap PNGs to DIR (default: .) and place them "
+        "on the board as reference images",
+    )
+    p.add_argument(
+        "--overlay-layers",
+        nargs="+",
+        metavar="LAYER",
+        default=list(DEFAULT_OVERLAY_LAYERS),
+        help="User layers for the overlays, one per copper layer in stack order",
+    )
+    p.add_argument("--kicad-cli", metavar="PATH", help="kicad-cli binary used for DRC")
+    _add_allow_splits_argument(p)
+
+
+def _add_allow_splits_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--allow-splits",
+        action="store_true",
+        help="Commit even when DRC finds new unconnected or isolated copper "
+        "that no via could be blamed for; the spots get markers",
+    )
+
+
+def _add_ground_nets_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--ground-nets",
+        nargs="+",
+        metavar="NET",
+        help="Ground nets (default: nets with zones on two or more inner layers, "
+        "else GND)",
+    )
+
+
+def execute_returnvia(args):
+    options = ReturnViaOptions(
+        distance=args.distance,
+        ground_nets=tuple(args.ground_nets) if args.ground_nets else None,
+        via=args.via,
+        force=args.force,
+    )
+    settings = RunSettings(
+        command="returnvia",
+        dry_run=args.dry_run,
+        kicad_cli=args.kicad_cli,
+        allow_splits=args.allow_splits,
+    )
+    with _exit_on(NoGroundNetsError, *PLACEMENT_ERRORS):
+        run_placement(plan_return_vias, options, settings)
 
 
 def parse_args():
@@ -253,17 +345,79 @@ def parse_args():
 
     cut_parser.add_argument("--netclass", type=str, help="Netclass to break tracks on")
 
-    gnd_via_parser = subparsers.add_parser("gndvia", help="Visualize GND via distances")
+    gnd_via_parser = subparsers.add_parser(
+        "gndvia", help="Visualize vias without a nearby ground return via"
+    )
 
     gnd_via_parser.add_argument(
         "--distance",
         "-d",
         type=float,
-        default=2,
-        help="Maximum distance to GND via, in mm",
+        default=DEFAULT_DISTANCE,
+        help="Maximum distance to a return via, in mm",
     )
+    _add_ground_nets_argument(gnd_via_parser)
 
-    subparsers.add_parser("clear", help="Remove annotations from User.Eco2 layer")
+    padvia_parser = subparsers.add_parser(
+        "padvia", help="Place a via and stub for every unserved SMD pad of given nets"
+    )
+    padvia_parser.add_argument(
+        "--nets",
+        nargs="+",
+        metavar="NET",
+        required=True,
+        help="Nets whose SMD pads get vias",
+    )
+    padvia_parser.add_argument(
+        "--via",
+        type=parse_via_size,
+        metavar="DIAMETER/DRILL",
+        help="Via size in mm, overriding the net's netclass size",
+    )
+    padvia_parser.add_argument(
+        "--kicad-cli", metavar="PATH", help="kicad-cli binary used for DRC"
+    )
+    _add_allow_splits_argument(padvia_parser)
+
+    add_pourstitch_parser(subparsers)
+
+    clear_parser = subparsers.add_parser(
+        "clear",
+        help="Remove annotations from User.Eco2 and breakneck's overlay images",
+    )
+    clear_parser.add_argument(
+        "--overlay-layers",
+        nargs="+",
+        metavar="LAYER",
+        default=list(DEFAULT_OVERLAY_LAYERS),
+        help="User layers to remove breakneck overlays from",
+    )
+    returnvia_parser = subparsers.add_parser(
+        "returnvia", help="Place a ground return via near every signal via"
+    )
+    returnvia_parser.add_argument(
+        "--distance",
+        "-d",
+        type=float,
+        default=DEFAULT_DISTANCE,
+        help="Maximum distance from a via to its return via, in mm",
+    )
+    _add_ground_nets_argument(returnvia_parser)
+    returnvia_parser.add_argument(
+        "--via",
+        type=parse_via_size,
+        metavar="DIAMETER/DRILL",
+        help="Return via size in mm (default: the ground net's netclass)",
+    )
+    returnvia_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Place best-effort vias where none fits with full clearance",
+    )
+    returnvia_parser.add_argument(
+        "--kicad-cli", metavar="PATH", help="kicad-cli binary used for DRC"
+    )
+    _add_allow_splits_argument(returnvia_parser)
 
     return parser.parse_args()
 
@@ -274,17 +428,70 @@ def execute_clear(args):
 
     shapes = board.get_shapes()
     eco2_shapes = [shape for shape in shapes if shape.layer == BL.BL_Eco2_User]
+    outline = outline_from_edge_paths(read_edge_paths(shapes))
+    images = (
+        []
+        if outline.is_empty
+        else breakneck.overlay.overlays_on(
+            board,
+            args.overlay_layers,
+            breakneck.overlay.board_placement(outline.bounds),
+        )
+    )
 
-    if not shapes:
-        logger.info("No shapes to clear")
+    if not eco2_shapes and not images:
+        logger.info("Nothing to clear")
         return
 
     commit = board.begin_commit()
-    board.remove_items(eco2_shapes)
+    board.remove_items([*eco2_shapes, *images])
     if args.dry_run:
         board.drop_commit(commit)
     else:
         board.push_commit(commit)
+
+
+def execute_padvia(args):
+    options = PadviaOptions(nets=tuple(args.nets), via=args.via)
+    settings = RunSettings(
+        "padvia",
+        dry_run=args.dry_run,
+        kicad_cli=args.kicad_cli,
+        allow_splits=args.allow_splits,
+    )
+    with _exit_on(*PLACEMENT_ERRORS):
+        run_placement(plan_padvia, options, settings)
+
+
+def execute_pourstitch(args):
+    try:
+        from breakneck import pourstitch, pourstitch_command
+    except ModuleNotFoundError as e:
+        logger.error(
+            f"{e}; install the place extra: uv tool install 'breakneck[place]'"
+        )
+        raise SystemExit(1)
+
+    options = pourstitch.Options(
+        nets=tuple(args.nets),
+        distance=args.distance,
+        via=args.via,
+        fallback_via=args.fallback_via,
+    )
+    outputs = pourstitch_command.Outputs(
+        render=args.render,
+        overlay_dir=args.overlay,
+        overlay_layers=tuple(args.overlay_layers),
+    )
+    with _exit_on(pourstitch_command.OverlayLayersError, *PLACEMENT_ERRORS):
+        pourstitch_command.execute(
+            options,
+            outputs,
+            dry_run=args.dry_run,
+            check=args.check,
+            kicad_cli=args.kicad_cli,
+            allow_splits=args.allow_splits,
+        )
 
 
 def main():
@@ -296,6 +503,13 @@ def main():
 
         case "gndvia":
             execute_gndvia_check(args)
+
+        case "padvia":
+            execute_padvia(args)
+        case "pourstitch":
+            execute_pourstitch(args)
+        case "returnvia":
+            execute_returnvia(args)
 
         case "clear":
             execute_clear(args)

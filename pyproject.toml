@@ -2,7 +2,7 @@
 name = "breakneck"
 version = "0.3.0"
 authors = [{ name = "Matti Airas", email = "matti.airas@hatlabs.fi" }]
-description = "Stitching via visualization and manual forced neckdowns for KiCad"
+description = "DRC-checked placement of return, pad and pour stitching vias, via visualization and manual neckdowns for KiCad"
 readme = "README.md"
 requires-python = ">=3.11"
 classifiers = [
@@ -17,11 +17,15 @@ license-files = ["LICENSE"]
 keywords = ["KiCad", "EDA", "PCB", "stitching", "neckdown", "breakneck"]
 
 dependencies = [
-    "kicad-python >= 0.2.0",
+    "kicad-python >= 0.8.0",
     "loguru>=0.7.2",
+    "numpy>=2.0",
     "shapely>=2.0.7",
     "svgpathtools>=1.6.1",
 ]
+
+[project.optional-dependencies]
+place = ["matplotlib>=3.10.0", "scikit-image>=0.25", "scipy>=1.14"]
 
 [project.urls]
 Homepage = "https://github.com/hatlabs/breakneck"
@@ -30,8 +34,16 @@ Homepage = "https://github.com/hatlabs/breakneck"
 breakneck = "breakneck.cli:main"
 
 [dependency-groups]
-dev = ["ipykernel>=6.29.5", "matplotlib>=3.10.0", "pytest>=8.3.4"]
+dev = [
+    "ipykernel>=6.29.5",
+    "pytest>=8.3.4",
+    # The pourstitch and render tests import the place extra at collection.
+    "breakneck[place]",
+]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
