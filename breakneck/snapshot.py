@@ -152,6 +152,18 @@ class Snapshot:
         return reduce(shapely.symmetric_difference, shells, Polygon())
 
     @cached_property
+    def via_keepouts(self) -> BaseGeometry:
+        """Area of the rule areas that keep out vias."""
+        return unary_union(
+            [z.outline for z in self.zones if z.is_rule_area and z.keepout_vias]
+        )
+
+    def in_via_keepout(self, position: Point2, radius: float) -> bool:
+        """Whether a via of `radius` at `position` touches a via keepout."""
+        keepouts = self.via_keepouts
+        return not keepouts.is_empty and Point(position).distance(keepouts) <= radius
+
+    @cached_property
     def copper_zones(self) -> tuple[Zone, ...]:
         return tuple(z for z in self.zones if not z.is_rule_area and z.net)
 

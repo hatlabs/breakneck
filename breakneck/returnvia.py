@@ -28,6 +28,7 @@ from breakneck.plan import (
     Plan,
     PlannedUnit,
     UnfixableSpot,
+    pad_clearance,
 )
 from breakneck.snapshot import (
     MIN_STITCH_LAYERS,
@@ -223,7 +224,7 @@ class _Board:
                 p.position,
                 p.drill / 2,
                 None,
-                max(HOLE_TO_HOLE_GAP, p.clearance_override or 0.0),
+                pad_clearance(p.clearance_override),
             )
             for p in snapshot.pads
             if p.kind is PadKind.NPTH and p.drill > 0
@@ -244,16 +245,6 @@ class _Board:
     def edge(self) -> BaseGeometry:
         return self.snapshot.board_outline.boundary
 
-    @cached_property
-    def keepouts(self) -> BaseGeometry:
-        return shapely.union_all(
-            [
-                z.outline
-                for z in self.snapshot.zones
-                if z.is_rule_area and z.keepout_vias
-            ]
-        )
-
     def add_via(self, position: Point2, net: str, size: ViaSize) -> None:
         self.added.append(_Circle(position, size.diameter / 2, net))
         self.added_holes.append(_Hole(position, size.drill / 2))
@@ -271,7 +262,7 @@ class _Board:
             return False
         if not self.placeable.contains(pt) or pt.distance(self.edge) < EDGE_GAP + r:
             return False
-        if not self.keepouts.is_empty and pt.buffer(r).intersects(self.keepouts):
+        if self.snapshot.in_via_keepout(position, r):
             return False
         return all(math.dist(position, f) >= FORBIDDEN_RADIUS for f in self.forbidden)
 
@@ -357,7 +348,7 @@ class _Board:
 def _static_obstacles(snapshot: Snapshot) -> list[_Obstacle]:
     out: list[_Obstacle] = []
     for p in snapshot.pads:
-        clearance = max(OTHER_NET_CLEARANCE, p.clearance_override or 0.0)
+        clearance = pad_clearance(p.clearance_override)
         if p.shapes:
             copper = shapely.union_all(list(p.shapes.values()))
             out.append(_Obstacle(p.net, copper, clearance, SAME_NET_PAD_GAP))

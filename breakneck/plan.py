@@ -20,6 +20,16 @@ OTHER_NET_CLEARANCE = 0.3
 SAME_NET_PAD_GAP = 0.15
 HOLE_TO_HOLE_GAP = 0.3
 EDGE_GAP = 0.5
+# Added to a pad's clearance override; HALSER mounting holes carry 1.6 mm.
+OVERRIDE_MARGIN = 0.1
+
+
+def pad_clearance(override: float | None) -> float:
+    """Gap from a pad's copper, or an unplated hole's edge, to other-net copper."""
+    if override is None:
+        return OTHER_NET_CLEARANCE
+    return max(OTHER_NET_CLEARANCE, override + OVERRIDE_MARGIN)
+
 
 # pourstitch defaults live here so the CLI can show them without the place extra.
 POURSTITCH_DISTANCE = 2.5

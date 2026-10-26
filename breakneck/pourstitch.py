@@ -39,6 +39,7 @@ from breakneck.plan import (
     Plan,
     PlannedUnit,
     UnfixableSpot,
+    pad_clearance,
     raster_size,
 )
 from breakneck.snapshot import MIN_STITCH_LAYERS, PadKind, Point2, Snapshot, ViaSize
@@ -318,12 +319,11 @@ class _Context:
         # The False border makes the board edge count as outside.
         inside = np.pad(g.mask(snap.board_outline), 1)
         edge = _edt(inside)[1:-1, 1:-1] * np.float32(g.pixel)
-        keepouts = _union(z.outline for z in snap.zones if z.keepout_vias)
         holes = [Point(p.position).buffer(p.drill / 2) for p in snap.pads if p.drill]
         holes += [Point(v.position).buffer(v.drill / 2) for v in snap.vias]
         return (
             edge,
-            g.distance_to(g.touching(keepouts)),
+            g.distance_to(g.touching(snap.via_keepouts)),
             g.distance_to(g.touching(_union(holes))),
         )
 
@@ -368,11 +368,7 @@ class _Context:
 
         for p in snap.pads:
             other = p.net != net
-            gap = (
-                max(OTHER_NET_CLEARANCE, p.clearance_override or 0)
-                if other
-                else SAME_NET_PAD_GAP
-            )
+            gap = pad_clearance(p.clearance_override) if other else SAME_NET_PAD_GAP
             if layer in p.shapes:
                 add(gap, p.shapes[layer])
             elif p.kind is PadKind.NPTH and p.drill and other:

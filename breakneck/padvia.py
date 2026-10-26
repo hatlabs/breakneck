@@ -30,11 +30,10 @@ from breakneck.plan import (
     PlannedUnit,
     Stub,
     UnfixableSpot,
+    pad_clearance,
 )
 from breakneck.snapshot import Pad, PadKind, Point2, Snapshot, ViaSize
 
-# Added to a pad's clearance override; HALSER mounting holes carry 1.6 mm.
-OVERRIDE_MARGIN = 0.1
 OWN_PAD_GAP = 0.15
 
 SERVED_DISTANCE = 1.0
@@ -73,12 +72,6 @@ class _UnplatedHole:
     copper_gap: float
 
 
-def _clearance(override: float | None) -> float:
-    if override is None:
-        return OTHER_NET_CLEARANCE
-    return max(OTHER_NET_CLEARANCE, override + OVERRIDE_MARGIN)
-
-
 def _minor_dimension(geom: BaseGeometry) -> float:
     corners = shapely.get_coordinates(shapely.oriented_envelope(geom))
     return min(math.dist(corners[0], corners[1]), math.dist(corners[1], corners[2]))
@@ -98,7 +91,7 @@ class _Board:
         self.unplated: list[_UnplatedHole] = []
         drills: list[tuple[float, float, float]] = []
         for pad in snapshot.pads:
-            clearance = _clearance(pad.clearance_override)
+            clearance = pad_clearance(pad.clearance_override)
             for layer, geom in pad.shapes.items():
                 self.copper.append(_Copper(pad.net, layer, geom, clearance, pad.id))
             if pad.drill > 0:
@@ -122,9 +115,6 @@ class _Board:
         )
 
         self.via_area = snapshot.board_outline
-        self.keepouts = shapely.union_all(
-            [z.outline for z in snapshot.zones if z.keepout_vias]
-        )
 
     def place(self, unit: PlannedUnit) -> None:
         disk = Point(unit.position).buffer(unit.size.diameter / 2)
@@ -177,7 +167,7 @@ class _Board:
             r + EDGE_GAP
         ):
             return False
-        if not self.keepouts.is_empty and c.distance(self.keepouts) < r:
+        if self.snapshot.in_via_keepout(pos, r):
             return False
         if any(c.distance(f) < FORBIDDEN_RADIUS for f in self.forbidden):
             return False

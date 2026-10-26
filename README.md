@@ -157,4 +157,4 @@ Breakneck has basic support for filtering the affected tracks and components by 
 - Grouped tracks and footprints are ignored due to API limitations. It is possible to enter a group and
   run `breakneck --selection` to process the group members.
 - Placed vias can't be grouped, because KiCad 10 refuses to create groups through the API.
-- The planners use fixed clearances (0.3 mm to other-net copper, plus pad clearance overrides) and don't evaluate custom design rules. The DRC check is what enforces those.
+- The planners use fixed clearances (0.3 mm to other-net copper; a pad's clearance override plus 0.1 mm where it has one) and don't evaluate custom design rules. The DRC check is what enforces those.
