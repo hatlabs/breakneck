@@ -27,8 +27,19 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 from skimage.graph import MCP_Geometric
 
-from breakneck.plan import FORBIDDEN_RADIUS, Plan, PlannedUnit, UnfixableSpot
-from breakneck.snapshot import PadKind, Point2, Snapshot, ViaSize
+from breakneck.plan import (
+    EDGE_GAP,
+    FORBIDDEN_RADIUS,
+    HOLE_TO_HOLE_GAP,
+    OTHER_NET_CLEARANCE,
+    POURSTITCH_DISTANCE,
+    POURSTITCH_FALLBACK_VIA,
+    SAME_NET_PAD_GAP,
+    Plan,
+    PlannedUnit,
+    UnfixableSpot,
+)
+from breakneck.snapshot import MIN_STITCH_LAYERS, PadKind, Point2, Snapshot, ViaSize
 
 BoolMap = npt.NDArray[np.bool_]
 FloatMap = npt.NDArray[np.floating]
@@ -37,13 +48,6 @@ Pixel = tuple[int, int]
 PIXEL = 0.1
 # Every clearance gets one pixel of margin for the rasterisation error.
 QUANTISATION = 0.1
-DEFAULT_DISTANCE = 2.5
-DEFAULT_FALLBACK_VIA = ViaSize(0.5, 0.3)
-CLEARANCE = 0.3
-# Keeps vias out of same-net pads (no via-in-pad).
-PAD_GAP = 0.15
-HOLE_GAP = 0.3
-EDGE_GAP = 0.5
 VIA_SPACING = 0.9
 IN_FILL_MARGIN = 0.05
 # Thermal spokes let an existing stitch reach fill a little beyond its copper.
@@ -51,7 +55,6 @@ THERMAL_REACH = 0.4
 LATTICE_WINDOW = 0.6
 # A new via only shortens distances near it; bounding the update keeps it fast.
 UPDATE_REACH_FACTOR = 3
-MIN_STITCH_LAYERS = 2
 UNREACHABLE = 1e6
 FAR = 1e9
 COORD_DECIMALS = 3
@@ -60,9 +63,9 @@ COORD_DECIMALS = 3
 @dataclass(frozen=True)
 class Options:
     nets: tuple[str, ...]
-    distance: float = DEFAULT_DISTANCE
+    distance: float = POURSTITCH_DISTANCE
     via: ViaSize | None = None
-    fallback_via: ViaSize = DEFAULT_FALLBACK_VIA
+    fallback_via: ViaSize = POURSTITCH_FALLBACK_VIA
 
     @property
     def pitch(self) -> float:
@@ -282,7 +285,7 @@ class _Context:
         ok = {
             s: (self._edge >= r + EDGE_GAP)
             & (self._keepout >= r)
-            & (self._hole >= s.drill / 2 + QUANTISATION + HOLE_GAP)
+            & (self._hole >= s.drill / 2 + QUANTISATION + HOLE_TO_HOLE_GAP)
             for s, r in radius.items()
         }
         n_required = np.zeros(g.shape, np.int8)
@@ -315,17 +318,21 @@ class _Context:
 
         for p in snap.pads:
             other = p.net != net
-            gap = max(CLEARANCE, p.clearance_override or 0) if other else PAD_GAP
+            gap = (
+                max(OTHER_NET_CLEARANCE, p.clearance_override or 0)
+                if other
+                else SAME_NET_PAD_GAP
+            )
             if layer in p.shapes:
                 add(gap, p.shapes[layer])
             elif p.kind is PadKind.NPTH and p.drill and other:
                 add(gap, Point(p.position).buffer(p.drill / 2))
         for t in snap.tracks:
             if t.layer == layer and t.net != net:
-                add(CLEARANCE, t.geometry)
+                add(OTHER_NET_CLEARANCE, t.geometry)
         for v in snap.vias:
             if v.net != net:
-                add(CLEARANCE, Point(v.position).buffer(v.diameter / 2))
+                add(OTHER_NET_CLEARANCE, Point(v.position).buffer(v.diameter / 2))
         # Other nets' pours are not obstacles: they refill around new vias.
         return out
 

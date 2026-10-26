@@ -19,7 +19,16 @@ from shapely.geometry.base import BaseGeometry
 from shapely.prepared import PreparedGeometry, prep
 from shapely.strtree import STRtree
 
-from breakneck.plan import FORBIDDEN_RADIUS, Plan, PlannedUnit, UnfixableSpot
+from breakneck.plan import (
+    EDGE_GAP,
+    FORBIDDEN_RADIUS,
+    HOLE_TO_HOLE_GAP,
+    OTHER_NET_CLEARANCE,
+    SAME_NET_PAD_GAP,
+    Plan,
+    PlannedUnit,
+    UnfixableSpot,
+)
 from breakneck.snapshot import (
     MIN_STITCH_LAYERS,
     PadKind,
@@ -29,11 +38,6 @@ from breakneck.snapshot import (
 )
 
 DEFAULT_DISTANCE = 1.5
-# Spacing rules the planner keeps; kicad-cli DRC remains the authority.
-CLEARANCE = 0.3
-EDGE_CLEARANCE = 0.5
-HOLE_TO_HOLE = 0.3
-SAME_NET_PAD_GAP = 0.15
 # Candidate rings around each unserved via.
 RING_STEP = 0.05
 RING_ANGLES = 36
@@ -184,13 +188,15 @@ class _Board:
         self.forbidden = list(forbidden)
         self.obstacles = _static_obstacles(snapshot)
         self.tree = STRtree([o.geometry for o in self.obstacles])
-        self.max_gap = max((o.clearance for o in self.obstacles), default=CLEARANCE)
+        self.max_gap = max(
+            (o.clearance for o in self.obstacles), default=OTHER_NET_CLEARANCE
+        )
         self.keep_offs = [
             _Circle(
                 p.position,
                 p.drill / 2,
                 None,
-                max(HOLE_TO_HOLE, p.clearance_override or 0.0),
+                max(HOLE_TO_HOLE_GAP, p.clearance_override or 0.0),
             )
             for p in snapshot.pads
             if p.kind is PadKind.NPTH and p.drill > 0
@@ -236,10 +242,7 @@ class _Board:
         r = size.diameter / 2
         if self.snapshot.board_outline.is_empty:
             return False
-        if (
-            not self.placeable.contains(pt)
-            or pt.distance(self.edge) < EDGE_CLEARANCE + r
-        ):
+        if not self.placeable.contains(pt) or pt.distance(self.edge) < EDGE_GAP + r:
             return False
         if not self.keepouts.is_empty and pt.buffer(r).intersects(self.keepouts):
             return False
@@ -251,7 +254,8 @@ class _Board:
         if any(k.gap(position, radius) < k.keep_off for k in self.keep_offs):
             return False
         if any(
-            c.net != net and c.gap(position, radius) < CLEARANCE for c in self.added
+            c.net != net and c.gap(position, radius) < OTHER_NET_CLEARANCE
+            for c in self.added
         ):
             return False
         disk = Point(position).buffer(radius)
@@ -261,14 +265,14 @@ class _Board:
                 return False
         r = size.drill / 2
         return all(
-            math.dist(position, h.position) - r - h.radius >= HOLE_TO_HOLE
+            math.dist(position, h.position) - r - h.radius >= HOLE_TO_HOLE_GAP
             for h in (*self.holes, *self.added_holes)
         )
 
     def clearance_to_other_nets(
         self, position: Point2, net: str, size: ViaSize
     ) -> float:
-        """Smallest gap to other-net copper, capped at CLEARANCE.
+        """Smallest gap to other-net copper, capped at OTHER_NET_CLEARANCE.
 
         A mounting-hole keep-off counts as copper; zero or less overlaps.
         """
@@ -276,12 +280,12 @@ class _Board:
         disk = Point(position).buffer(radius)
         gaps = [
             disk.distance(o.geometry)
-            for o in self._nearby(disk, CLEARANCE)
+            for o in self._nearby(disk, OTHER_NET_CLEARANCE)
             if o.net != net
         ]
         gaps += [c.gap(position, radius) for c in self.added if c.net != net]
         gaps += [k.gap(position, radius) - k.keep_off for k in self.keep_offs]
-        return min([CLEARANCE, *gaps])
+        return min([OTHER_NET_CLEARANCE, *gaps])
 
     def connects(
         self, position: Point2, net: str, size: ViaSize, *, filled: bool
@@ -309,13 +313,13 @@ class _Board:
 def _static_obstacles(snapshot: Snapshot) -> list[_Obstacle]:
     out: list[_Obstacle] = []
     for p in snapshot.pads:
-        clearance = max(CLEARANCE, p.clearance_override or 0.0)
+        clearance = max(OTHER_NET_CLEARANCE, p.clearance_override or 0.0)
         if p.shapes:
             copper = shapely.union_all(list(p.shapes.values()))
             out.append(_Obstacle(p.net, copper, clearance, SAME_NET_PAD_GAP))
-    out += [_Obstacle(t.net, t.geometry, CLEARANCE) for t in snapshot.tracks]
+    out += [_Obstacle(t.net, t.geometry, OTHER_NET_CLEARANCE) for t in snapshot.tracks]
     out += [
-        _Obstacle(v.net, Point(v.position).buffer(v.diameter / 2), CLEARANCE)
+        _Obstacle(v.net, Point(v.position).buffer(v.diameter / 2), OTHER_NET_CLEARANCE)
         for v in snapshot.vias
     ]
     return out
@@ -354,7 +358,7 @@ def _find_spot(
     board: _Board, u: Unserved, ground: str, size: ViaSize, distance: float
 ) -> Point2 | None:
     """Nearest spot on rings around `u` with full clearance."""
-    start = u.diameter / 2 + size.diameter / 2 + CLEARANCE
+    start = u.diameter / 2 + size.diameter / 2 + OTHER_NET_CLEARANCE
     for r in _radii(start, distance - ROUNDING_MARGIN):
         for a in _angles(RING_ANGLES):
             pos = _ring_point(u.position, r, a)

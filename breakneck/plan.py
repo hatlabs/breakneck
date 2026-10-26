@@ -13,6 +13,17 @@ from breakneck.snapshot import Point2, Snapshot, ViaSize
 
 FORBIDDEN_RADIUS = 0.5
 
+# Spacing rules the planners keep; kicad-cli DRC remains the authority.
+OTHER_NET_CLEARANCE = 0.3
+# Keeps vias out of same-net pads (no via-in-pad).
+SAME_NET_PAD_GAP = 0.15
+HOLE_TO_HOLE_GAP = 0.3
+EDGE_GAP = 0.5
+
+# pourstitch defaults live here so the CLI can show them without the place extra.
+POURSTITCH_DISTANCE = 2.5
+POURSTITCH_FALLBACK_VIA = ViaSize(0.5, 0.3)
+
 
 @dataclass(frozen=True)
 class Stub:

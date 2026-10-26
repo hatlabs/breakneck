@@ -8,9 +8,8 @@ from kipy.proto.board.board_types_pb2 import BoardLayer
 from shapely.geometry import LineString, Point, box
 
 from breakneck import cli
-from breakneck.plan import FORBIDDEN_RADIUS
+from breakneck.plan import FORBIDDEN_RADIUS, OTHER_NET_CLEARANCE
 from breakneck.returnvia import (
-    CLEARANCE,
     ReturnViaOptions,
     plan_return_vias,
     return_lines,
@@ -106,8 +105,8 @@ def test_signal_via_gets_return_within_distance_clear_of_other_net_track():
     assert u.net == "GND"
     assert not u.forced
     assert math.dist(u.position, sig.position) <= 1.5 + EPS
-    assert disk(u.position).distance(other.geometry) >= CLEARANCE - EPS
-    assert disk(u.position).distance(disk(sig.position)) >= CLEARANCE - EPS
+    assert disk(u.position).distance(other.geometry) >= OTHER_NET_CLEARANCE - EPS
+    assert disk(u.position).distance(disk(sig.position)) >= OTHER_NET_CLEARANCE - EPS
     assert not result.unfixable
 
 

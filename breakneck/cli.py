@@ -13,6 +13,7 @@ from breakneck.commit import Marker, MarkerKind, eco2_segment, marker_items
 from breakneck.overlay import DEFAULT_OVERLAY_LAYERS
 from breakneck.padvia import PadviaOptions, plan_padvia
 from breakneck.placement import RunSettings, run_placement
+from breakneck.plan import POURSTITCH_DISTANCE, POURSTITCH_FALLBACK_VIA
 from breakneck.returnvia import (
     DEFAULT_DISTANCE,
     ReturnViaOptions,
@@ -202,7 +203,7 @@ def add_pourstitch_parser(subparsers) -> None:
         "--distance",
         "-d",
         type=float,
-        default=2.5,
+        default=POURSTITCH_DISTANCE,
         help="Maximum distance to a stitch, through the copper, in mm",
     )
     p.add_argument(
@@ -214,7 +215,7 @@ def add_pourstitch_parser(subparsers) -> None:
     p.add_argument(
         "--fallback-via",
         type=parse_via_size,
-        default="0.5/0.3",
+        default=POURSTITCH_FALLBACK_VIA,
         metavar="DIAMETER/DRILL",
         help="Smaller via size in mm for spots the netclass size doesn't fit",
     )

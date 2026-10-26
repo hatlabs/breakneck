@@ -20,17 +20,22 @@ from shapely.geometry import LineString, Point
 from shapely.geometry.base import BaseGeometry
 from shapely.strtree import STRtree
 
-from breakneck.plan import FORBIDDEN_RADIUS, Plan, PlannedUnit, Stub, UnfixableSpot
+from breakneck.plan import (
+    EDGE_GAP,
+    FORBIDDEN_RADIUS,
+    HOLE_TO_HOLE_GAP,
+    OTHER_NET_CLEARANCE,
+    SAME_NET_PAD_GAP,
+    Plan,
+    PlannedUnit,
+    Stub,
+    UnfixableSpot,
+)
 from breakneck.snapshot import Pad, PadKind, Point2, Snapshot, ViaSize
 
-# Other-net copper clearance on every layer the planned copper touches.
-OTHER_NET_CLEARANCE = 0.3
 # Added to a pad's clearance override; HALSER mounting holes carry 1.6 mm.
 OVERRIDE_MARGIN = 0.1
 OWN_PAD_GAP = 0.15
-SAME_NET_PAD_GAP = 0.15
-HOLE_TO_HOLE_GAP = 0.3
-EDGE_GAP = 0.5
 
 SERVED_DISTANCE = 1.0
 DIRECTIONS = 48

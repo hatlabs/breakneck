@@ -5,9 +5,8 @@ import pytest
 from shapely.geometry import Point, box
 from shapely.ops import unary_union
 
-from breakneck.plan import FORBIDDEN_RADIUS, PlannedUnit
+from breakneck.plan import FORBIDDEN_RADIUS, OTHER_NET_CLEARANCE, PlannedUnit
 from breakneck.pourstitch import (
-    CLEARANCE,
     QUANTISATION,
     Options,
     PourStitcher,
@@ -191,7 +190,7 @@ def test_other_net_pad_clearance_enforced_inside_own_fill():
     copper = unary_union(pad_shapes)
     for u in plan.units:
         gap = Point(u.position).distance(copper) - u.size.diameter / 2
-        assert gap >= CLEARANCE
+        assert gap >= OTHER_NET_CLEARANCE
 
 
 def test_pad_clearance_override_is_honoured():
