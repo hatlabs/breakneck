@@ -561,6 +561,28 @@ def test_drc_runner_uses_utf8_regardless_of_locale(tmp_path, monkeypatch):
     assert [v.items[0].description for v in new] == ["Via 10Ω"]
 
 
+SLOW_CLI = "import time; time.sleep(30)"
+
+
+def test_drc_runner_timeout_is_a_drc_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(drc, "DRC_TIMEOUT_S", 0.2)
+    cli = make_executable(tmp_path / "kicad-cli", SLOW_CLI)
+    (tmp_path / "b.kicad_pro").write_text("{}")
+    files = drc.ProjectFiles(pro=tmp_path / "b.kicad_pro", dru=None)
+
+    runner = drc.DrcRunner(cli, files, BOARD_WITH_FONTS, tmp_path)
+
+    with pytest.raises(drc.DrcError, match="timed out after 0.2 s"):
+        runner.new_violations(Plan(units=(unit(1, 2),)))
+
+
+def test_kicad_cli_version_probe_times_out(tmp_path, monkeypatch):
+    monkeypatch.setattr(drc, "VERSION_TIMEOUT_S", 0.2)
+    cli = make_executable(tmp_path / "kicad-cli", SLOW_CLI)
+
+    assert drc.kicad_cli_version(cli) == "unknown (version probe timed out)"
+
+
 def test_drc_runner_raises_when_kicad_cli_fails(tmp_path):
     cli = make_executable(tmp_path / "kicad-cli", "import sys; sys.exit(3)")
     (tmp_path / "b.kicad_pro").write_text("{}")

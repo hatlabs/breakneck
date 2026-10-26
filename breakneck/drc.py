@@ -47,6 +47,7 @@ STARVED_THERMAL = "starved_thermal"
 THROUGH_VIA_LAYERS = ("F.Cu", "B.Cu")
 FONTS_MARKER = "\n\t(embedded_fonts"
 DRC_TIMEOUT_S = 900
+VERSION_TIMEOUT_S = 30
 
 
 class KiCadCliNotFound(RuntimeError):
@@ -107,9 +108,16 @@ def locate_kicad_cli(explicit: str | None, kicad: BinaryPathSource | None) -> Pa
 
 
 def kicad_cli_version(kicad_cli: Path) -> str:
-    out = subprocess.run(
-        [str(kicad_cli), "version"], capture_output=True, text=True, check=False
-    )
+    try:
+        out = subprocess.run(
+            [str(kicad_cli), "version"],
+            capture_output=True,
+            text=True,
+            timeout=VERSION_TIMEOUT_S,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return "unknown (version probe timed out)"
     return out.stdout.strip() or out.stderr.strip() or "unknown"
 
 
@@ -302,9 +310,12 @@ class DrcRunner:
             str(out),
             str(pcb),
         ]
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=DRC_TIMEOUT_S, check=False
-        )
+        try:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=DRC_TIMEOUT_S, check=False
+            )
+        except subprocess.TimeoutExpired:
+            raise DrcError(f"kicad-cli DRC timed out after {DRC_TIMEOUT_S} s") from None
         if proc.returncode != 0 or not out.is_file():
             raise DrcError(
                 f"kicad-cli DRC failed ({proc.returncode}): {proc.stderr.strip()}"
