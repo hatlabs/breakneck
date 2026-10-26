@@ -11,6 +11,7 @@ import breakneck.footprint
 import breakneck.overlay
 from breakneck.commit import Marker, MarkerKind, eco2_segment, marker_items
 from breakneck.overlay import DEFAULT_OVERLAY_LAYERS
+from breakneck.padvia import PadviaOptions, plan_padvia
 from breakneck.placement import RunSettings, run_placement
 from breakneck.returnvia import (
     DEFAULT_DISTANCE,
@@ -398,9 +399,6 @@ def execute_clear(args):
 
 
 def execute_padvia(args):
-    from breakneck.padvia import PadviaOptions, plan_padvia
-    from breakneck.placement import RunSettings, run_placement
-
     options = PadviaOptions(nets=tuple(args.nets), via=args.via)
     settings = RunSettings("padvia", dry_run=args.dry_run, kicad_cli=args.kicad_cli)
     run_placement(plan_padvia, options, settings)
