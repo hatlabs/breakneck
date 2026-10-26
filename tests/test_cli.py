@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from breakneck import cli, placement
+from breakneck import cli, placement, pourstitch_command
 from breakneck.cli import parse_via_size
 from breakneck.snapshot import ViaSize
 
@@ -46,3 +46,56 @@ def test_refused_split_exits_with_an_error(monkeypatch):
         cli.execute_padvia(args)
 
     assert exit_info.value.code == 1
+
+
+def parsed(monkeypatch, argv):
+    monkeypatch.setattr(sys, "argv", ["breakneck", *argv])
+    return cli.parse_args()
+
+
+@pytest.mark.parametrize(
+    "argv, execute",
+    [
+        (["returnvia"], cli.execute_returnvia),
+        (["padvia", "--nets", "GND"], cli.execute_padvia),
+    ],
+)
+@pytest.mark.parametrize("allow", [False, True])
+def test_allow_splits_reaches_the_run_settings(monkeypatch, argv, execute, allow):
+    seen: list[placement.RunSettings] = []
+    monkeypatch.setattr(
+        cli, "run_placement", lambda planner, options, settings: seen.append(settings)
+    )
+    flag = ["--allow-splits"] if allow else []
+
+    execute(parsed(monkeypatch, [*argv, *flag]))
+
+    assert [s.allow_splits for s in seen] == [allow]
+
+
+class Captured(Exception):
+    pass
+
+
+@pytest.mark.parametrize("allow", [False, True])
+def test_pourstitch_allow_splits_reaches_the_run_settings(monkeypatch, allow):
+    seen: list[placement.RunSettings] = []
+
+    def capture(planner, options, settings, kicad):
+        seen.append(settings)
+        raise Captured
+
+    monkeypatch.setattr(pourstitch_command, "run_placement", capture)
+    monkeypatch.setattr(
+        pourstitch_command.kipy,
+        "KiCad",
+        lambda: type("K", (), {"get_board": lambda self: None})(),
+    )
+    flag = ["--allow-splits"] if allow else []
+
+    with pytest.raises(Captured):
+        cli.execute_pourstitch(
+            parsed(monkeypatch, ["pourstitch", "--nets", "GND", *flag])
+        )
+
+    assert [s.allow_splits for s in seen] == [allow]
