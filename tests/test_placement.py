@@ -608,9 +608,11 @@ class RefillBoard:
         self.error = error
         self.errors = list(errors)
         self.refills = 0
+        self.blocking = []
 
     def refill_zones(self, block=True, max_poll_seconds=0):
         self.refills += 1
+        self.blocking.append(block)
         error = self.errors.pop(0) if self.errors else self.error
         if error:
             raise error
@@ -620,10 +622,38 @@ def busy():
     return ApiError("busy", code=ApiStatusCode.AS_BUSY)
 
 
+class FakeClock:
+    """Time that moves only when the code under test sleeps or a ping waits."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
 def test_refill_success():
-    assert commit.refill_tolerant(
-        FakeKiCad(None), RefillBoard(None), sleep=lambda s: None
+    board = RefillBoard(None)
+
+    assert commit.refill_tolerant(FakeKiCad(None), board, sleep=lambda s: None)
+    # kipy's blocking refill has no working time limit, so ours bounds the wait.
+    assert board.blocking == [False]
+
+
+def test_refill_gives_up_when_kicad_stays_busy():
+    kicad = FakeKiCad(None)
+    kicad.pings = [busy()] * 10
+    clock = FakeClock()
+
+    ok = commit.refill_tolerant(
+        kicad, RefillBoard(None), timeout_s=3, poll_s=1, sleep=clock.sleep, clock=clock
     )
+
+    assert not ok
+    assert len(kicad.pings) == 7  # three polls, then the deadline
 
 
 def test_refill_timeout_waits_until_kicad_answers():
@@ -646,16 +676,62 @@ def test_refill_timeout_waits_until_kicad_answers():
 def test_refill_gives_up_after_timeout():
     kicad = FakeKiCad(None)
     kicad.pings = [ConnectionError("timeout")] * 10
+    clock = FakeClock()
 
     ok = commit.refill_tolerant(
         kicad,
         RefillBoard(ConnectionError("timeout")),
         timeout_s=3,
         poll_s=1,
-        sleep=lambda s: None,
+        sleep=clock.sleep,
+        clock=clock,
     )
 
     assert not ok
+
+
+def test_refill_wait_is_bounded_in_time_not_polls():
+    # A ping to a KiCad that is filling waits out the client timeout, so a
+    # poll count would stretch the wait to several times timeout_s.
+    clock = FakeClock()
+    pings = []
+
+    class SlowKiCad:
+        def ping(self):
+            pings.append(clock.now)
+            clock.sleep(2)
+            raise ConnectionError("timeout")
+
+    ok = commit.refill_tolerant(
+        SlowKiCad(),  # type: ignore[arg-type]
+        RefillBoard(None),
+        timeout_s=6,
+        poll_s=1,
+        sleep=clock.sleep,
+        clock=clock,
+    )
+
+    assert not ok
+    assert len(pings) == 2
+    assert clock.now <= 6 + 1 + 2  # at most one poll and one ping past it
+
+
+def test_refill_accepted_at_the_deadline_still_asks_kicad_once():
+    kicad = FakeKiCad(None)
+    kicad.pings = [None]
+    clock = FakeClock()
+
+    ok = commit.refill_tolerant(
+        kicad,
+        RefillBoard(errors=[busy()] * 3),
+        timeout_s=3,
+        poll_s=1,
+        sleep=clock.sleep,
+        clock=clock,
+    )
+
+    assert ok
+    assert kicad.pings == []
 
 
 def test_refill_reraises_real_errors():
@@ -676,7 +752,7 @@ def test_refill_refused_as_busy_is_retried():
 
     assert ok
     assert board.refills == 3
-    assert len(sleeps) == 2
+    assert len(sleeps) == 3  # two retries, then one wait for KiCad to answer
 
 
 def test_refill_busy_is_logged_once_naming_the_likely_cause(log):
@@ -692,9 +768,10 @@ def test_refill_busy_is_logged_once_naming_the_likely_cause(log):
 def test_refill_busy_until_the_deadline_is_not_success():
     kicad = FakeKiCad(None)
     board = RefillBoard(busy())
+    clock = FakeClock()
 
     ok = commit.refill_tolerant(
-        kicad, board, timeout_s=3, poll_s=1, sleep=lambda s: None
+        kicad, board, timeout_s=3, poll_s=1, sleep=clock.sleep, clock=clock
     )
 
     assert not ok

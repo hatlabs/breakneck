@@ -66,6 +66,9 @@ class KiCad:
     def get_board(self):
         return self.board
 
+    def ping(self):
+        pass
+
 
 @pytest.fixture
 def fakes(monkeypatch):

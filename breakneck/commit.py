@@ -227,24 +227,26 @@ def refill_tolerant(
     timeout_s: float = REFILL_TIMEOUT_S,
     poll_s: float = REFILL_POLL_S,
     sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
 ) -> bool:
-    """Refill zones, tolerating API timeouts on large boards.
+    """Refill zones and wait, until `timeout_s` has passed, for KiCad to answer.
 
-    KiCad keeps filling after the API call times out, so wait until it
-    answers a ping again. A ping reply suggests, but doesn't prove, that the
-    refill finished. AS_BUSY means KiCad refused to start the refill (a tool
-    or dialog is active), so the call is retried instead.
+    kipy's blocking refill never applies its own time limit (its poll loop
+    doesn't count), so the refill is started without blocking and the
+    deadline is ours. A ping to a KiCad busy filling waits out the client
+    timeout, so the deadline is wall-clock, not a poll count. A ping reply
+    suggests, but doesn't prove, that the fill finished. AS_BUSY on the
+    refill itself means KiCad refused to start it (a tool or dialog is
+    active), so it is retried.
     """
-    polls_left = int(timeout_s / poll_s)
+    deadline = clock() + timeout_s
     busy_logged = False
     while True:
         try:
-            board.refill_zones(block=True, max_poll_seconds=timeout_s)
-            return True
+            board.refill_zones(block=False)
+            break
         except KiCadConnectionError as e:
-            logger.warning(
-                f"Zone refill timed out over the API ({e}); waiting for KiCad"
-            )
+            logger.warning(f"Zone refill request timed out ({e}); waiting for KiCad")
             break
         except ApiError as e:
             if e.code != ApiStatusCode.AS_BUSY:
@@ -255,20 +257,22 @@ def refill_tolerant(
                     "editor; retrying the zone refill"
                 )
                 busy_logged = True
-            if polls_left == 0:
+            if clock() >= deadline:
                 logger.warning("KiCad stayed busy; zones were not refilled")
                 return False
-            polls_left -= 1
             sleep(poll_s)
 
-    for _ in range(polls_left):
+    # Once KiCad has the refill, ask at least once whether it is done.
+    while True:
         sleep(poll_s)
         try:
             kicad.ping()
+            return True
         except (ApiError, KiCadConnectionError) as e:
             if not _busy(e):
                 raise
-            continue
-        logger.info("KiCad responds again after the refill")
-        return True
-    return False
+        if clock() >= deadline:
+            logger.warning(
+                f"KiCad did not answer within {timeout_s:.0f} s of the zone refill"
+            )
+            return False
