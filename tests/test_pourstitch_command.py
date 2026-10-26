@@ -322,3 +322,33 @@ def test_planning_run_logs_uncovered_area_without_unstitchable_copper(
     (front,) = [line for line in log if "GND on F.Cu" in line]
     assert "0.00 mm² (0 px)" in front
     assert f"{ISLAND_MM2:.2f} mm² can't be stitched" in front
+
+
+class ImagesBoard(Board):
+    def __init__(self, images):
+        super().__init__()
+        self.images = images
+
+    def get_reference_images(self):
+        return self.images
+
+
+def test_run_without_maps_removes_the_previous_overlays(fakes, tmp_path: Path):
+    created, _ = fakes
+    outputs = pourstitch_command.Outputs(overlay_dir=tmp_path)
+    pourstitch_command.execute(OPTIONS, outputs, check=True, kicad=KiCad(Board()))  # type: ignore[arg-type]
+    board = ImagesBoard(list(created))
+
+    pourstitch_command.execute(
+        Options(nets=("+3.3V",)),
+        outputs,
+        check=True,
+        kicad=KiCad(board),  # type: ignore[arg-type]
+    )
+
+    assert board.calls == [
+        "refill_zones",
+        "begin_commit",
+        "remove_items",
+        ("push_commit", pourstitch_command.OVERLAY_COMMIT),
+    ]

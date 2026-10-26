@@ -502,8 +502,12 @@ def test_place_overlays_replaces_images_in_one_commit(tmp_path, monkeypatch):
     )
 
     assert overlay.place_overlays(
-        board, [image(tmp_path)], ("User.1", "User.2"), "label"
-    )  # type: ignore[arg-type]
+        board,  # type: ignore[arg-type]
+        [image(tmp_path)],
+        PLACEMENT,
+        ("User.1", "User.2"),
+        "label",
+    )
 
     assert board.calls == [
         "begin_commit",
@@ -522,7 +526,13 @@ def test_place_overlays_commits_under_the_given_label(tmp_path, monkeypatch):
     monkeypatch.setattr(overlay, "create_checked", lambda board, items: None)
     board = ImageBoard()
 
-    overlay.place_overlays(board, [image(tmp_path)], ("User.1",), "other overlay")  # type: ignore[arg-type]
+    overlay.place_overlays(
+        board,  # type: ignore[arg-type]
+        [image(tmp_path)],
+        PLACEMENT,
+        ("User.1",),
+        "other overlay",
+    )
 
     assert board.calls == ["begin_commit", ("push_commit", "other overlay")]
 
@@ -534,9 +544,74 @@ def test_refused_overlay_falls_back_to_manual_placement(tmp_path, monkeypatch):
     monkeypatch.setattr(overlay, "create_checked", refuse)
     board = ImageBoard()
 
-    assert not overlay.place_overlays(board, [image(tmp_path)], ("User.1",), "label")  # type: ignore[arg-type]
+    assert not overlay.place_overlays(
+        board,  # type: ignore[arg-type]
+        [image(tmp_path)],
+        PLACEMENT,
+        ("User.1",),
+        "label",
+    )
 
     assert board.calls == ["begin_commit", "drop_commit"]
+
+
+def test_placing_no_images_removes_breakneck_overlays_only(monkeypatch):
+    created = []
+    monkeypatch.setattr(
+        overlay, "create_checked", lambda board, items: created.extend(items)
+    )
+    ours = Existing(BL.BL_User_2)
+    board = ImageBoard(
+        existing=[ours, Existing(BL.BL_User_1, (30, 30)), Existing(BL.BL_Cmts_User)]
+    )
+
+    assert overlay.place_overlays(
+        board,  # type: ignore[arg-type]
+        [],
+        PLACEMENT,
+        ("User.1", "User.2"),
+        "label",
+    )
+
+    assert board.calls == [
+        "begin_commit",
+        ("remove_items", 1),
+        ("push_commit", "label"),
+    ]
+    assert board.removed == [ours]
+    assert created == []
+
+
+def test_placing_no_images_over_none_makes_no_commit():
+    board = ImageBoard(existing=[Existing(BL.BL_User_1, (30, 30))])
+
+    assert overlay.place_overlays(
+        board,  # type: ignore[arg-type]
+        [],
+        PLACEMENT,
+        ("User.1",),
+        "label",
+    )
+
+    assert board.calls == []
+
+
+def test_previous_overlays_are_found_at_the_board_placement(tmp_path, monkeypatch):
+    # The new images' own placement plays no part: an untagged old overlay
+    # counts by where the board puts overlays.
+    monkeypatch.setattr(overlay, "create_checked", lambda board, items: None)
+    elsewhere = overlay.image_placement((5, 5), (10, 10), 0.1)
+    board = ImageBoard(existing=[Existing(BL.BL_User_1, elsewhere.centre)])
+
+    overlay.place_overlays(
+        board,  # type: ignore[arg-type]
+        [image(tmp_path)],
+        elsewhere,
+        ("User.1",),
+        "label",
+    )
+
+    assert ("remove_items", 1) in board.calls
 
 
 class ClearBoard:

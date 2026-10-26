@@ -178,9 +178,9 @@ def execute(
             overlay.OverlayImage(L, layers[L], path, placement)
             for L, path in pngs.items()
         ]
-        if place_overlay and images:
+        if place_overlay:
             overlay.place_overlays(
-                board, images, outputs.overlay_layers, OVERLAY_COMMIT
+                board, images, placement, outputs.overlay_layers, OVERLAY_COMMIT
             )
         else:
             for i in images:

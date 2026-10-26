@@ -167,26 +167,27 @@ def overlays_on(
 def place_overlays(
     board: kipy.board.Board,
     images: Sequence[OverlayImage],
+    placement: ImagePlacement,
     overlay_layers: Sequence[str],
     commit_label: str,
 ) -> bool:
     """Replace breakneck's overlays on the overlay layers in one commit.
 
-    Other reference images on those layers are left alone. If KiCad refuses
-    an image, nothing changes and the log says where to place the PNGs by
-    hand.
+    `placement` is the board's overlay placement, which finds untagged
+    overlays of earlier builds. With no images, the previous set is only
+    removed; with nothing to remove either, nothing is committed. Other
+    reference images on those layers are left alone. If KiCad refuses an
+    image, nothing changes and the log says where to place the PNGs by hand.
     """
-    placements = {i.placement for i in images}
-    old = [
-        i
-        for i in board.get_reference_images()
-        if any(is_overlay(i, p, overlay_layers) for p in placements)
-    ]
+    old = overlays_on(board, overlay_layers, placement)
+    if not images and not old:
+        return True
     commit = board.begin_commit()
     try:
         if old:
             board.remove_items(old)
-        create_checked(board, [_reference_image(i) for i in images])
+        if images:
+            create_checked(board, [_reference_image(i) for i in images])
     except CreateItemsError as e:
         board.drop_commit(commit)
         logger.warning(f"KiCad refused the overlay images ({e}); place them by hand:")
@@ -197,10 +198,13 @@ def place_overlays(
         board.drop_commit(commit)
         raise
     board.push_commit(commit, commit_label)
-    logger.info(
-        f"Placed {len(images)} overlay images"
-        + (f", replacing {len(old)}" if old else "")
-    )
+    if images:
+        logger.info(
+            f"Placed {len(images)} overlay images"
+            + (f", replacing {len(old)}" if old else "")
+        )
+    else:
+        logger.info(f"Removed {len(old)} overlay images")
     for i in images:
         logger.info(f"  {i.describe()}")
     return True
