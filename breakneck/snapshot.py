@@ -136,20 +136,7 @@ class Snapshot:
 
     @cached_property
     def board_outline(self) -> BaseGeometry:
-        """Board area polygonised from the Edge.Cuts paths.
-
-        Closed Edge.Cuts loops nest even-odd: a loop inside the outline is a
-        cutout, a loop inside a cutout is board again.
-        """
-        lines = [
-            LineString([_snap(p) for p in path])
-            for path in self.edge_paths
-            if len(path) >= 2
-        ]
-        if not lines:
-            return Polygon()
-        shells = [Polygon(f.exterior) for f in polygonize(unary_union(lines))]
-        return reduce(shapely.symmetric_difference, shells, Polygon())
+        return outline_from_edge_paths(self.edge_paths)
 
     @cached_property
     def via_keepouts(self) -> BaseGeometry:
@@ -493,6 +480,19 @@ def _read_footprint(f: kipy.board_types.FootprintInstance) -> Footprint:
         position=_mm(f.position),
         layer=canonical_name(f.layer),
     )
+
+
+def outline_from_edge_paths(paths: Iterable[Sequence[Point2]]) -> BaseGeometry:
+    """Board area polygonised from Edge.Cuts paths.
+
+    Closed Edge.Cuts loops nest even-odd: a loop inside the outline is a
+    cutout, a loop inside a cutout is board again.
+    """
+    lines = [LineString([_snap(p) for p in path]) for path in paths if len(path) >= 2]
+    if not lines:
+        return Polygon()
+    shells = [Polygon(f.exterior) for f in polygonize(unary_union(lines))]
+    return reduce(shapely.symmetric_difference, shells, Polygon())
 
 
 def read_edge_paths(

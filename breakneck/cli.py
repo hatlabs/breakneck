@@ -27,7 +27,12 @@ from breakneck.returnvia import (
     plan_return_vias,
     return_lines,
 )
-from breakneck.snapshot import Snapshot, ViaSize, read_edge_paths
+from breakneck.snapshot import (
+    Snapshot,
+    ViaSize,
+    outline_from_edge_paths,
+    read_edge_paths,
+)
 
 
 def break_tracks(
@@ -423,14 +428,14 @@ def execute_clear(args):
 
     shapes = board.get_shapes()
     eco2_shapes = [shape for shape in shapes if shape.layer == BL.BL_Eco2_User]
-    outline = Snapshot(copper_layers=(), edge_paths=read_edge_paths(shapes))
+    outline = outline_from_edge_paths(read_edge_paths(shapes))
     images = (
         []
-        if outline.board_outline.is_empty
+        if outline.is_empty
         else breakneck.overlay.overlays_on(
             board,
             args.overlay_layers,
-            breakneck.overlay.board_placement(outline.board_outline.bounds),
+            breakneck.overlay.board_placement(outline.bounds),
         )
     )
 
