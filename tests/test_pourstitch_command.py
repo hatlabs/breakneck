@@ -409,9 +409,7 @@ def test_power_check_measures_and_renders_at_the_power_distance(
             (maps, distance)
         ),
     )
-    options = Options(
-        stitch_class=StitchClass.POWER, distance=POURSTITCH_POWER_DISTANCE
-    )
+    options = Options(stitch_class=StitchClass.POWER)
 
     pourstitch_command.execute(
         options,

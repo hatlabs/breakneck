@@ -532,16 +532,11 @@ def execute_pourstitch(args):
     with _needs_place_extra():
         from breakneck import pourstitch, pourstitch_command
 
-    stitch_class, default_distance = (
-        (StitchClass.POWER, POURSTITCH_POWER_DISTANCE)
-        if args.power
-        else (StitchClass.GROUND, POURSTITCH_GROUND_DISTANCE)
-    )
     options = pourstitch.Options(
         nets=None if args.nets is None else tuple(args.nets),
-        stitch_class=stitch_class,
+        stitch_class=StitchClass.POWER if args.power else StitchClass.GROUND,
         ground_nets=tuple(args.ground_nets) if args.ground_nets else None,
-        distance=default_distance if args.distance is None else args.distance,
+        distance=args.distance,
         via=args.via,
         fallback_via=args.fallback_via,
     )

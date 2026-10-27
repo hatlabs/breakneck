@@ -32,7 +32,6 @@ from breakneck.plan import (
     HOLE_TO_HOLE_GAP,
     OTHER_NET_CLEARANCE,
     POURSTITCH_FALLBACK_VIA,
-    POURSTITCH_GROUND_DISTANCE,
     QUANTISATION,
     SAME_NET_PAD_GAP,
     THERMAL_REACH,
@@ -70,14 +69,22 @@ class Options:
     stitch_class: StitchClass = StitchClass.GROUND
     # None: detect them the way returnvia does.
     ground_nets: tuple[str, ...] | None = None
-    distance: float = POURSTITCH_GROUND_DISTANCE
+    # None: the stitch class's default; read `max_distance`.
+    distance: float | None = None
     via: ViaSize | None = None
     fallback_via: ViaSize = POURSTITCH_FALLBACK_VIA
 
     @property
+    def max_distance(self) -> float:
+        """Farthest any pour pixel may be from a stitch, through the copper."""
+        if self.distance is None:
+            return self.stitch_class.default_distance
+        return self.distance
+
+    @property
     def pitch(self) -> float:
-        """Square lattice pitch whose cell centre is `distance` from a site."""
-        return self.distance * math.sqrt(2)
+        """Square lattice pitch whose cell centre is `max_distance` from a site."""
+        return self.max_distance * math.sqrt(2)
 
 
 def lattice_sites(
@@ -141,7 +148,7 @@ def _class_nets(snapshot: Snapshot, options: Options) -> list[str]:
             logger.warning(f"Net {n} is a {other} net; skipping (stitch it {flag})")
     logger.info(
         f"pourstitch: {wanted.value} nets with pours on two or more layers, "
-        f"stitched at {options.distance:g} mm: " + (", ".join(nets) or "none")
+        f"stitched at {options.max_distance:g} mm: " + (", ".join(nets) or "none")
     )
     return nets
 
@@ -196,7 +203,7 @@ class _Context:
         a two-layer pour by a long neck is out of reach beyond the neck's
         first D, though it is one island with the pour.
         """
-        d = self.options.distance
+        d = self.options.max_distance
         out = {}
         for net in self.nets:
             joinable = self.joinable[net]
@@ -376,7 +383,7 @@ class _NetRun:
     def add(self, px: Pixel, size: ViaSize) -> None:
         ctx = self.ctx
         unit = PlannedUnit(ctx.grid.point(px), self.net, size)
-        limit = UPDATE_REACH_FACTOR * ctx.options.distance
+        limit = UPDATE_REACH_FACTOR * ctx.options.max_distance
         for L, touched in ctx.unit_touch(unit).items():
             self.dist[L] = np.minimum(
                 self.dist[L], ctx.geodesic(self.net, L, touched, limit)
@@ -416,7 +423,7 @@ class _NetRun:
         return placed
 
     def _worst(self, unfixable: dict[str, BoolMap]) -> tuple[str, Pixel] | None:
-        d = self.ctx.options.distance
+        d = self.ctx.options.max_distance
         worst: tuple[float, str, Pixel] | None = None
         for L, dist in self.dist.items():
             bad = self.ctx.fill[(self.net, L)] & ~unfixable[L] & (dist > d)
@@ -430,7 +437,7 @@ class _NetRun:
         return None if worst is None else (worst[1], worst[2])
 
     def greedy(self) -> int:
-        ctx, d = self.ctx, self.ctx.options.distance
+        ctx, d = self.ctx, self.ctx.options.max_distance
         # No via can reach unstitchable copper; searching it would only add
         # spurious unfixable spots.
         unfixable = {L: ctx.unstitchable[(self.net, L)].copy() for L in self.dist}
@@ -470,7 +477,7 @@ class _NetRun:
 
     def uncovered_mm2(self) -> float:
         ctx = self.ctx
-        d, px = ctx.options.distance, ctx.grid.pixel
+        d, px = ctx.options.max_distance, ctx.grid.pixel
         return sum(
             float(
                 np.sum(
@@ -520,7 +527,7 @@ class PourStitcher:
             n_greedy = run.greedy()
             logger.info(
                 f"pourstitch {net}: {n_lattice} lattice + {n_greedy} gap vias, "
-                f"{run.uncovered_mm2():.2f} mm² beyond {options.distance:g} mm"
+                f"{run.uncovered_mm2():.2f} mm² beyond {options.max_distance:g} mm"
             )
         return Plan(units=tuple(out.units), unfixable=tuple(out.unfixable))
 

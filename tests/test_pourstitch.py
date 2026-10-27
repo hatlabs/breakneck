@@ -470,12 +470,23 @@ def ground_and_power_snapshot():
 
 
 def ground(**kw):
-    return Options(distance=POURSTITCH_GROUND_DISTANCE, **kw)
+    return Options(**kw)
 
 
 def power(**kw):
-    kw.setdefault("distance", POURSTITCH_POWER_DISTANCE)
     return Options(stitch_class=StitchClass.POWER, **kw)
+
+
+@pytest.mark.parametrize(
+    ("stitch_class", "default"),
+    [
+        (StitchClass.GROUND, POURSTITCH_GROUND_DISTANCE),
+        (StitchClass.POWER, POURSTITCH_POWER_DISTANCE),
+    ],
+)
+def test_distance_defaults_to_the_class_distance(stitch_class, default):
+    assert Options(stitch_class=stitch_class).max_distance == default
+    assert Options(stitch_class=stitch_class, distance=4).max_distance == 4
 
 
 def interior_sites_planned(snap, plan, net, pour, pitch):

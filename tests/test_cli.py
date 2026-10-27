@@ -230,7 +230,7 @@ def test_pourstitch_distance_defaults_to_the_class_distance(
     options = pourstitch_options(monkeypatch, ["pourstitch", *argv])
 
     assert options.stitch_class is stitch_class
-    assert options.distance == distance
+    assert options.max_distance == distance
 
 
 def test_pourstitch_takes_ground_nets(monkeypatch):

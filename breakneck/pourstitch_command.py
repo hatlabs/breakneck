@@ -41,7 +41,7 @@ def _log_coverage(
     grid: Grid,
 ) -> None:
     counts = stitcher.stitch_counts(snapshot, options)
-    for c in summarise(maps, options.distance, grid.pixel):
+    for c in summarise(maps, options.max_distance, grid.pixel):
         unstitchable = (
             f"; {c.unstitchable_mm2:.2f} mm² can't be stitched (no two-layer spot within reach)"
             if c.unstitchable_mm2
@@ -49,7 +49,7 @@ def _log_coverage(
         )
         logger.info(
             f"  {c.net} on {c.layer}: {c.uncovered_mm2:.2f} mm² ({c.uncovered_pixels} px) "
-            f"beyond {options.distance:g} mm; {counts[c.net]} existing stitches"
+            f"beyond {options.max_distance:g} mm; {counts[c.net]} existing stitches"
             + unstitchable
         )
 
@@ -125,7 +125,7 @@ def execute(
             grid,
             maps,
             markers(snapshot, plan, maps),
-            options.distance,
+            options.max_distance,
             STYLE,
         )
         logger.info(f"Wrote {outputs.render}")
@@ -136,7 +136,7 @@ def execute(
             board,
             (
                 lambda out_dir: render.write_overlays(
-                    out_dir, grid, maps, {}, options.distance, STYLE
+                    out_dir, grid, maps, {}, options.max_distance, STYLE
                 )
             )
             if maps
