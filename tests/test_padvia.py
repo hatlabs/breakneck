@@ -371,7 +371,11 @@ def test_net_with_zone_on_one_layer_only_is_skipped():
 
 
 def test_via_must_sit_inside_fill_on_required_layers_other_than_pad_layer():
-    back_fill = BOARD.difference(Point(CENTRE).buffer(3.0))
+    # A strip of fill within reach makes the pad a candidate, but it is too
+    # narrow for any via to sit inside it.
+    x, y = CENTRE
+    sliver = box(x + 0.9, y - 2, x + 1.0, y + 2)
+    back_fill = BOARD.difference(Point(CENTRE).buffer(3.0)).union(sliver)
     zones = [
         Zone(
             net="GND",
@@ -510,8 +514,7 @@ def test_without_nets_a_pad_over_its_net_zone_on_another_layer_is_selected(log):
 
     assert len(plan.units) == 1
     assert any(
-        "padvia: nets with a zone over their pads on another layer: GND" in m
-        for m in log
+        "padvia: nets with fill near their pads on another layer: GND" in m for m in log
     )
 
 
@@ -564,3 +567,36 @@ def test_nets_skip_a_pad_without_its_net_zone_on_another_layer():
 
     assert plan.units == ()
     assert plan.unfixable == ()
+
+
+def test_without_nets_a_zone_outline_over_another_nets_fill_does_not_select_it():
+    # A board-wide +3.3V zone on B.Cu whose fill a higher-priority GND zone
+    # displaces under the pad: the outline covers the pad, but no via there
+    # could reach +3.3V copper.
+    zones = [
+        zone("GND", ("F.Cu", "B.Cu")),
+        zone(
+            "+3.3V",
+            ("F.Cu", "B.Cu"),
+            fills={"F.Cu": BOARD, "B.Cu": box(20, 0, 30, 20)},
+        ),
+    ]
+
+    plan = plan_padvia(snapshot([pad("+3.3V", (5, 5))], zones=zones), ALL_NETS, [])
+
+    assert plan.units == ()
+    assert plan.unfixable == ()
+
+
+def test_without_nets_fill_just_past_the_stub_length_still_selects_the_pad():
+    # The via first clears the pad, then searches a stub's length further, so
+    # the planner reaches fill a little beyond MAX_STUB from the pad edge.
+    x, _ = CENTRE
+    back = box(x + 0.25 + 1.3, 0, BOARD.bounds[2], BOARD.bounds[3])
+    zones = [
+        zone("GND", ("F.Cu", "B.Cu"), fills={"F.Cu": BOARD, "B.Cu": back}),
+    ]
+
+    plan = plan_padvia(snapshot([pad("GND", CENTRE)], zones=zones), ALL_NETS, [])
+
+    assert len(plan.units) == 1

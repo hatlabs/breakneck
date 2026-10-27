@@ -26,7 +26,7 @@ The ground nets are the nets with zones on two or more inner layers. A board wit
 
 ### Pad stitching vias
 
-`padvia` gives every SMD pad over a zone of its own net on another copper layer a via and a short stub track into the net's plane or pour, unless the pad already reaches a same-net via within 1 mm through its tracks, pads or pour. The via goes on the side of the pad facing away from the footprint centre where there is room. `--nets GND +3.3V` limits it to those pads of the listed nets. Keep `--nets` when a net meant to join its plane at a single point, such as a star ground, has a zone under its pads; leave that net out of the list.
+`padvia` gives every SMD pad with its own net's fill within reach on another copper layer a via and a short stub track into the net's plane or pour, unless the pad already reaches a same-net via within 1 mm through its tracks, pads or pour. The via goes on the side of the pad facing away from the footprint centre where there is room. `--nets GND +3.3V` limits it to those pads of the listed nets. Keep `--nets` when a net meant to join its plane at a single point, such as a star ground, has a zone under its pads; leave that net out of the list.
 
 ### Pour stitching vias
 

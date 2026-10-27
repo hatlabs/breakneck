@@ -1,6 +1,6 @@
 """Plan a via plus stub for every unserved SMD pad of the stitched nets.
 
-A pad is a candidate when a zone of its own net covers the pad's position
+A pad is a candidate when its own net has fill within the planner's reach of it
 on another copper layer; explicit nets narrow that selection.
 
 A pad is served when a same-net via lies within `SERVED_DISTANCE` of it and
@@ -36,6 +36,9 @@ INWARD_PENALTY = 0.4
 MIN_STUB_WIDTH = 0.2
 MAX_STUB_WIDTH = 0.4
 MIN_OUTWARD_LENGTH = 1e-6
+# How far from the pad edge the planner can reach fill: it clears the pad,
+# possibly overshooting by one step, then searches a stub's length.
+FILL_REACH = OWN_PAD_GAP + CLEARING_STEP + MAX_STUB
 POSITION_DECIMALS = 3
 
 
@@ -111,14 +114,20 @@ def _own_layer(pad: Pad) -> str:
     return layer
 
 
-def _over_own_zone_elsewhere(snapshot: Snapshot, pad: Pad) -> bool:
-    """A zone of the pad's net covers it on a layer other than the pad's."""
+def _over_own_fill_elsewhere(snapshot: Snapshot, pad: Pad) -> bool:
+    """The pad's net has fill within the planner's reach of it on another layer.
+
+    The fill, not the zone outline: a higher-priority zone of another net can
+    own the copper under the pad, and no via there would reach the net.
+    """
     layer = _own_layer(pad)
-    pt = Point(pad.position)
+    copper = pad.shapes[layer]
     return any(
         z.net == pad.net
-        and any(L != layer for L in z.layers)
-        and z.outline.contains(pt)
+        and any(
+            L != layer and fill.distance(copper) <= FILL_REACH
+            for L, fill in z.fills.items()
+        )
         for z in snapshot.copper_zones
     )
 
@@ -129,7 +138,7 @@ def _candidates(snapshot: Snapshot, nets: Iterable[str] | None) -> list[Pad]:
         for p in snapshot.pads
         if p.kind == PadKind.SMD
         and len(p.shapes) == 1
-        and _over_own_zone_elsewhere(snapshot, p)
+        and _over_own_fill_elsewhere(snapshot, p)
     ]
     derived = nets is None
     if derived:
@@ -137,7 +146,7 @@ def _candidates(snapshot: Snapshot, nets: Iterable[str] | None) -> list[Pad]:
     stitchable, _ = snapshot.split_stitchable(nets)
     if derived:
         logger.info(
-            "padvia: nets with a zone over their pads on another layer: "
+            "padvia: nets with fill near their pads on another layer: "
             + (", ".join(sorted(stitchable)) or "none")
         )
     return sorted((p for p in pads if p.net in stitchable), key=lambda p: p.position)
