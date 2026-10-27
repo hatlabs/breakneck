@@ -691,3 +691,13 @@ def test_four_layers_net_fill_only_on_the_far_outer_layer_selects_the_pad():
 
     assert len(plan.units) == 1
     assert plan.unfixable == ()
+
+
+def test_unfixable_spot_spans_its_pad():
+    big = pad("GND", CENTRE, 3.0, 2.0)
+    pads = [big, blocker("B.Cu", box(0, 0, 0, 0), inner=0.0, outer=4.0)]
+
+    plan = plan_padvia(snapshot(pads), GND, [])
+
+    (spot,) = plan.unfixable
+    assert spot.extent == pytest.approx(math.hypot(1.5, 1.0))

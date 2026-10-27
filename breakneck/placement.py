@@ -17,6 +17,7 @@ from breakneck.commit import (
     Marker,
     MarkerKind,
     commit_units,
+    marker_half_size,
     marker_shapes,
     refill_tolerant,
 )
@@ -64,7 +65,10 @@ def markers_for(
     result: drc.PruneResult, mark_unfixable: bool = True
 ) -> tuple[Marker, ...]:
     out = (
-        [Marker(s.position, MarkerKind.UNFIXABLE) for s in result.plan.unfixable]
+        [
+            Marker(s.position, MarkerKind.UNFIXABLE, marker_half_size(s.extent))
+            for s in result.plan.unfixable
+        ]
         if mark_unfixable
         else []
     )

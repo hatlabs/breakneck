@@ -268,7 +268,8 @@ def plan_padvia(
         size = _via_size(snapshot, options, pad.net)
         unit = _plan_pad(obstacles, pad, size, _outward(snapshot, pad))
         if unit is None:
-            c = pad.shapes[layer].centroid
+            shape = pad.shapes[layer]
+            c = shape.centroid
             unfixable.append(
                 UnfixableSpot(
                     position=_rounded((c.x, c.y)),
@@ -276,6 +277,7 @@ def plan_padvia(
                     reason=f"pad {_pad_label(snapshot, pad)}: no via spot "
                     f"within {MAX_STUB} mm",
                     layer=layer,
+                    extent=_extent(shape, c),
                 )
             )
             continue
@@ -286,6 +288,15 @@ def plan_padvia(
         f"{len(unfixable)} unfixable"
     )
     return Plan(units=tuple(units), unfixable=tuple(unfixable))
+
+
+def _extent(shape: BaseGeometry, centre: Point) -> float:
+    """Distance from `centre` to the farthest corner of `shape`'s bounding box."""
+    x0, y0, x1, y1 = shape.bounds
+    return max(
+        math.dist((centre.x, centre.y), q)
+        for q in ((x0, y0), (x0, y1), (x1, y0), (x1, y1))
+    )
 
 
 def _pad_label(snapshot: Snapshot, pad: Pad) -> str:

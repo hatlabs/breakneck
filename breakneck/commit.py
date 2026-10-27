@@ -33,6 +33,8 @@ from breakneck.snapshot import NM_PER_MM, Point2
 
 MARKER_LAYER = BoardLayer.BL_Eco2_User
 MARKER_HALF_SIZE = 0.5
+# How far a marker reaches past the copper it marks.
+MARKER_MARGIN = 0.3
 MARKER_WIDTH = 0.1
 REFILL_TIMEOUT_S = 300.0
 REFILL_POLL_S = 1.0
@@ -49,6 +51,12 @@ class MarkerKind(enum.Enum):
 class Marker:
     position: Point2
     kind: MarkerKind
+    half_size: float = MARKER_HALF_SIZE
+
+
+def marker_half_size(extent: float) -> float:
+    """Half size of a marker whose every glyph end lies past `extent`."""
+    return max(MARKER_HALF_SIZE, extent + MARKER_MARGIN)
 
 
 # Each kind gets its own glyph so the spots can be told apart on Eco2.
@@ -97,7 +105,7 @@ def marker_items(markers: Sequence[Marker]) -> list[kipy.board_types.BoardSegmen
     out = []
     for m in markers:
         x, y = m.position
-        h = MARKER_HALF_SIZE
+        h = m.half_size
         for (ax, ay), (bx, by) in _GLYPHS[m.kind]:
             out.append(eco2_segment((x + ax * h, y + ay * h), (x + bx * h, y + by * h)))
     return out

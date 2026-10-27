@@ -16,7 +16,7 @@ from loguru import logger
 from breakneck import commit, drc, placement
 from breakneck.commit import Marker, MarkerKind
 from breakneck.plan import Plan, PlannedUnit, Stub, UnfixableSpot
-from breakneck.snapshot import Snapshot, ViaSize
+from breakneck.snapshot import NM_PER_MM, Snapshot, ViaSize
 
 VIA = ViaSize(0.6, 0.3)
 BOARD_CHANGES = {
@@ -876,3 +876,22 @@ def test_measure_only_refills_and_snapshots_with_an_empty_plan(
     stale = [m for m in log if "fills may be stale" in m]
     assert len(stale) == (0 if refilled else 1)
     assert all(m.startswith("WARNING") for m in stale)
+
+
+def test_unfixable_marker_reaches_past_the_spot_extent():
+    extent = 2.0
+    spot = UnfixableSpot((10, 20), "GND", "x", layer="F.Cu", extent=extent)
+    result = drc.PruneResult(Plan(unfixable=(spot,)), (), (), (), 1)
+
+    items = commit.marker_items(placement.markers_for(result))
+
+    # The X's arms end at the half size along each axis.
+    half = min(abs(p.x / NM_PER_MM - 10) for s in items for p in (s.start, s.end))
+    assert half >= extent + commit.MARKER_MARGIN - 1e-6
+
+
+def test_markers_without_extent_keep_the_default_size():
+    items = commit.marker_items([Marker((10, 20), MarkerKind.UNFIXABLE)])
+
+    xs = [p.x for s in items for p in (s.start, s.end)]
+    assert max(xs) - min(xs) == 2 * commit.MARKER_HALF_SIZE * NM_PER_MM

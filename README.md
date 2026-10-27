@@ -106,7 +106,7 @@ Each placement run:
 
 Spots that need attention get markers on User.Eco2:
 
-- an X where no via fits (`returnvia` and `padvia`);
+- an X where no via fits (`returnvia` and `padvia`); on a `padvia` pad its arms reach past the pad, so copper drawn in front can't hide it;
 - a + at a forced via (`returnvia --force`);
 - a square at a new DRC violation that couldn't be pinned on a single via.
 
