@@ -521,6 +521,6 @@ def summarise(
     area = pixel * pixel
     for m in maps:
         n = int(np.sum(m.uncovered(distance)))
-        unstitchable = int(np.sum(m.unstitchable)) * area
+        unstitchable = int(np.sum(m.excluded)) * area
         out.append(LayerCoverage(m.net, m.layer, n, n * area, unstitchable))
     return out

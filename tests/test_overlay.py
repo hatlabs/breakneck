@@ -25,10 +25,10 @@ def rgb(colour):
     return tuple(round(c * 255) for c in render.matplotlib.colors.to_rgb(colour))
 
 
-def coverage(net, layer, dist, unstitchable=None):
-    if unstitchable is None:
-        unstitchable = np.zeros(dist.shape, bool)
-    return CoverageMap(net, layer, dist, unstitchable)
+def coverage(net, layer, dist, excluded=None):
+    if excluded is None:
+        excluded = np.zeros(dist.shape, bool)
+    return CoverageMap(net, layer, dist, excluded)
 
 
 def test_placement_maps_pixel_zero_to_raster_origin():
@@ -95,11 +95,11 @@ def test_overlay_image_has_raster_size_and_transparent_background(tmp_path: Path
     assert tuple(rgba[0, 40, :3]) == (0xFF, 0x2A, 0x6D)
 
 
-def test_unstitchable_copper_is_grey_not_pink(tmp_path: Path):
+def test_excluded_copper_is_grey_not_pink(tmp_path: Path):
     dist = np.full((10, 10), np.inf)
-    unstitchable = np.zeros(dist.shape, bool)
-    unstitchable[:, 5:] = True
-    maps = [coverage("GND", "F.Cu", dist, unstitchable)]
+    excluded = np.zeros(dist.shape, bool)
+    excluded[:, 5:] = True
+    maps = [coverage("GND", "F.Cu", dist, excluded)]
 
     rgba = np.asarray(
         Image.open(
@@ -108,12 +108,12 @@ def test_unstitchable_copper_is_grey_not_pink(tmp_path: Path):
     )
 
     assert tuple(rgba[0, 0, :3]) == (0xFF, 0x2A, 0x6D)
-    grey = render.matplotlib.colors.to_rgb(render.UNSTITCHABLE_COLOUR)
+    grey = render.matplotlib.colors.to_rgb(render.EXCLUDED_COLOUR)
     assert tuple(rgba[0, 9, :3]) == tuple(round(c * 255) for c in grey)
     assert rgba[0, 9, 3] == 255
 
 
-def test_layers_differing_only_in_unstitchable_copper_get_own_panels():
+def test_layers_differing_only_in_excluded_copper_get_own_panels():
     a = np.array([[np.inf, np.inf]])
     maps = [
         coverage("GND", "F.Cu", a),
@@ -157,9 +157,9 @@ def test_render_panels_draws_markers_where_they_are(tmp_path: Path):
     )
     grid = Grid(0, 0, 30, 20)
     dist = np.zeros((20, 30))
-    unstitchable = np.zeros(dist.shape, bool)
-    unstitchable[:, 25:] = True
-    maps = [coverage("GND", "F.Cu", dist, unstitchable)]
+    excluded = np.zeros(dist.shape, bool)
+    excluded[:, 25:] = True
+    maps = [coverage("GND", "F.Cu", dist, excluded)]
     plan = Plan(
         units=(PlannedUnit((1.5, 1.0), "GND", ViaSize(0.6, 0.3)),),
         unfixable=(UnfixableSpot((2.0, 1.4), "GND", "no fit", "F.Cu"),),
@@ -176,7 +176,7 @@ def test_render_panels_draws_markers_where_they_are(tmp_path: Path):
         return np.abs(rgb_px - rgb(colour)).sum(axis=2) < 30
 
     # The zero-distance copper is one solid colour; the rows and columns it
-    # dominates span the board from x 0 to the unstitchable strip at 2.5 mm
+    # dominates span the board from x 0 to the excluded strip at 2.5 mm
     # and from y 0 to 2 mm. The colourbar's low end shares the colour but
     # fills too little of any row to count.
     solid = near(render.matplotlib.colors.to_hex(STYLE_CMAP(0.0)))
@@ -198,7 +198,7 @@ def test_render_panels_draws_markers_where_they_are(tmp_path: Path):
     assert hit(render.MARKER_COLOUR, (1.5, 1.0))
     assert hit(render.UNFIXABLE_COLOUR, (2.0, 1.4), reach=2)
     assert not hit(render.UNFIXABLE_COLOUR, (1.5, 1.4), reach=2)
-    assert hit(render.UNSTITCHABLE_COLOUR, (2.75, 1.0))
+    assert hit(render.EXCLUDED_COLOUR, (2.75, 1.0))
 
 
 def test_render_panels_paints_unreached_copper_pink(tmp_path: Path):

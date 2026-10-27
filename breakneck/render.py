@@ -35,8 +35,8 @@ CROSS_SIZE = 5
 CROSS_LINE_WIDTH = 1.2
 # Two pixels, so a ring stays visible on the board zoomed out.
 OVERLAY_RING_WIDTH_MM = 0.2
-# Neutral, so copper no via can reach reads apart from the distance scale.
-UNSTITCHABLE_COLOUR = "#a0a0a0"
+# Neutral, so excluded copper reads apart from the distance scale.
+EXCLUDED_COLOUR = "#a0a0a0"
 PANEL_COLUMNS = 2
 PANEL_INCHES = 8
 PANEL_DPI = 100
@@ -111,15 +111,14 @@ def colourbar_extend(
         return "max"
     top = style.scale * distance
     beyond = any(
-        np.any(np.isfinite(m.distance) & (m.distance > top) & ~m.unstitchable)
-        for m in maps
+        np.any(np.isfinite(m.distance) & (m.distance > top) & ~m.excluded) for m in maps
     )
     return "max" if beyond else "neither"
 
 
 def _contour_pixels(m: CoverageMap, level: float) -> BoolMap:
     """Copper within `level` with an edge neighbour beyond it."""
-    served = (m.distance <= level) & ~m.unstitchable
+    served = (m.distance <= level) & ~m.excluded
     return served & ndimage.binary_dilation(m.uncovered(level), CONTOUR_NEIGHBOURS)
 
 
@@ -130,7 +129,7 @@ def _rgba_bytes(colour: str) -> npt.NDArray[np.uint8]:
 def _same(a: CoverageMap, b: CoverageMap) -> bool:
     return bool(
         np.array_equal(a.distance, b.distance, equal_nan=True)
-        and np.array_equal(a.unstitchable, b.unstitchable)
+        and np.array_equal(a.excluded, b.excluded)
     )
 
 
@@ -196,7 +195,7 @@ def render_panels(
     )
     fig.patch.set_facecolor(BACKGROUND)
     cmap = _colormap(style)
-    grey = matplotlib.colors.ListedColormap([UNSTITCHABLE_COLOUR])
+    grey = matplotlib.colors.ListedColormap([EXCLUDED_COLOUR])
     unreachable = matplotlib.colors.ListedColormap([style.unreachable_colour])
     image = None
     for ax in axs.ravel()[len(shown) :]:
@@ -206,11 +205,9 @@ def render_panels(
         extent = (x0, x1, y1, y0)
         # imshow draws non-finite values as background, so copper no seed
         # reaches (inf) gets a layer of its own.
-        lost = np.isinf(m.distance) & ~m.unstitchable
+        lost = np.isinf(m.distance) & ~m.excluded
         image = ax.imshow(
-            np.ma.masked_where(
-                m.unstitchable | lost | np.isnan(m.distance), m.distance
-            ),
+            np.ma.masked_where(m.excluded | lost | np.isnan(m.distance), m.distance),
             cmap=cmap,
             vmin=0,
             vmax=style.scale * distance,
@@ -221,9 +218,7 @@ def render_panels(
             ax.contour(
                 grid.xs,
                 grid.ys,
-                np.ma.masked_where(
-                    ~np.isfinite(m.distance) | m.unstitchable, m.distance
-                ),
+                np.ma.masked_where(~np.isfinite(m.distance) | m.excluded, m.distance),
                 levels=[distance + style.contour.margin],
                 colors=[style.contour.colour],
                 linewidths=CONTOUR_LINE_WIDTH,
@@ -235,7 +230,7 @@ def render_panels(
             interpolation="nearest",
         )
         ax.imshow(
-            np.ma.masked_where(~m.unstitchable, m.unstitchable),
+            np.ma.masked_where(~m.excluded, m.excluded),
             cmap=grey,
             extent=extent,
             interpolation="nearest",
@@ -317,7 +312,7 @@ def overlay_rgba(
         colours = cmap(norm(np.where(inside, m.distance, 0)), bytes=True)
         rgba[inside] = colours[inside]
         rgba[np.isinf(m.distance)] = _rgba_bytes(style.unreachable_colour)
-        rgba[m.unstitchable] = _rgba_bytes(UNSTITCHABLE_COLOUR)
+        rgba[m.excluded] = _rgba_bytes(EXCLUDED_COLOUR)
         if style.contour is not None:
             level = distance + style.contour.margin
             rgba[_contour_pixels(m, level)] = _rgba_bytes(style.contour.colour)

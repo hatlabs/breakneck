@@ -336,9 +336,9 @@ def test_front_only_island_is_unstitchable_not_uncovered():
     m = front_map(stitcher, snap, plan.units)
 
     grid = stitcher.grid(snap, options())
-    assert m.unstitchable[grid.index((14, 4))]
-    assert not m.unstitchable[grid.index((5, 5))]
-    assert m.unstitchable.sum() * PIXEL_MM2 == pytest.approx(island.area, rel=0.05)
+    assert m.excluded[grid.index((14, 4))]
+    assert not m.excluded[grid.index((5, 5))]
+    assert m.excluded.sum() * PIXEL_MM2 == pytest.approx(island.area, rel=0.05)
     (front,) = [c for c in summarise([m], D, grid.pixel) if c.layer == "F.Cu"]
     assert front.uncovered_pixels == 0
     assert front.unstitchable_mm2 == pytest.approx(island.area, rel=0.05)
@@ -352,7 +352,7 @@ def test_front_only_copper_joined_to_a_stitchable_pour_stays_stitchable():
 
     m = front_map(stitcher, snap)
 
-    assert not m.unstitchable.any()
+    assert not m.excluded.any()
 
 
 def test_front_only_copper_beyond_reach_of_a_two_layer_spot_is_unstitchable():
@@ -366,10 +366,10 @@ def test_front_only_copper_beyond_reach_of_a_two_layer_spot_is_unstitchable():
 
     m = front_map(stitcher, snap)
 
-    assert not m.unstitchable[grid.index((11, 5))]  # within D of the pour
-    assert m.unstitchable[grid.index((14, 5))]
-    assert m.unstitchable[grid.index((22, 5))]
-    assert not m.unstitchable[grid.index((5, 5))]
-    grey_mm2 = m.unstitchable.sum() * PIXEL_MM2
+    assert not m.excluded[grid.index((11, 5))]  # within D of the pour
+    assert m.excluded[grid.index((14, 5))]
+    assert m.excluded[grid.index((22, 5))]
+    assert not m.excluded[grid.index((5, 5))]
+    grey_mm2 = m.excluded.sum() * PIXEL_MM2
     expected = blob.area + (18 - 10 - D) * 1.0
     assert grey_mm2 == pytest.approx(expected, rel=0.05)
