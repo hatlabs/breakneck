@@ -225,7 +225,7 @@ def refill_tolerant(
     kicad: kipy.KiCad,
     board: kipy.board.Board,
     timeout_s: float = REFILL_TIMEOUT_S,
-    poll_s: float = REFILL_POLL_S,
+    poll_s: float | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> bool:
@@ -239,6 +239,8 @@ def refill_tolerant(
     refill itself means KiCad refused to start it (a tool or dialog is
     active), so it is retried.
     """
+    if poll_s is None:
+        poll_s = REFILL_POLL_S
     deadline = clock() + timeout_s
     busy_logged = False
     while True:

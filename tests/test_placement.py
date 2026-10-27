@@ -755,6 +755,17 @@ def test_refill_refused_as_busy_is_retried():
     assert len(sleeps) == 3  # two retries, then one wait for KiCad to answer
 
 
+def test_refill_polls_at_the_module_interval_by_default(monkeypatch):
+    monkeypatch.setattr(commit, "REFILL_POLL_S", 0.25)
+    sleeps = []
+
+    commit.refill_tolerant(
+        FakeKiCad(None), RefillBoard(errors=[busy()]), sleep=sleeps.append
+    )
+
+    assert sleeps == [0.25, 0.25]
+
+
 def test_refill_busy_is_logged_once_naming_the_likely_cause(log):
     board = RefillBoard(errors=[busy(), busy(), busy()])
 

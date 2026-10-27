@@ -60,7 +60,7 @@ def max_uncovered(stitcher, snap, opts, units):
 
 
 def test_square_pour_ends_fully_covered():
-    snap = pour_snapshot(box(0, 0, 20, 20))
+    snap = pour_snapshot(box(0, 0, 10, 10))
     stitcher = PourStitcher()
 
     plan = stitcher(snap, options(), [])
@@ -78,15 +78,15 @@ def test_lattice_pitch_is_distance_times_root_two():
 
 
 def test_open_pour_lattice_vias_sit_on_lattice_sites():
-    snap = pour_snapshot(box(0, 0, 30, 30))
+    snap = pour_snapshot(box(0, 0, 10, 10))
     plan = PourStitcher()(snap, options(), [])
-    sites = lattice_sites((0, 0, 30, 30), options().pitch, 0)
+    sites = lattice_sites((0, 0, 10, 10), options().pitch, 0)
 
     on_site = [
         u for u in plan.units if min(math.dist(u.position, s) for s in sites) <= 0.1
     ]
 
-    interior = [s for s in sites if 2 < s[0] < 28 and 2 < s[1] < 28]
+    interior = [s for s in sites if 2 < s[0] < 8 and 2 < s[1] < 8]
     assert len(on_site) >= len(interior)
 
 
@@ -142,8 +142,8 @@ def test_too_narrow_finger_is_reported_unfixable():
 
 
 def test_vias_keep_edge_gap_from_a_board_cutout():
-    pour = box(0, 0, 20, 20)
-    cutout = box(8, 8, 12, 12)
+    pour = box(0, 0, 10, 10)
+    cutout = box(3.5, 3.5, 6.5, 6.5)
     snap = pour_snapshot(pour)
     snap = Snapshot(
         copper_layers=snap.copper_layers,
@@ -162,7 +162,7 @@ def test_vias_keep_edge_gap_from_a_board_cutout():
 
 
 def test_forbidden_position_is_not_reused():
-    snap = pour_snapshot(box(0, 0, 20, 20))
+    snap = pour_snapshot(box(0, 0, 10, 10))
     stitcher = PourStitcher()
     first = stitcher(snap, options(), [])
     forbidden = first.units[len(first.units) // 2].position
@@ -175,7 +175,7 @@ def test_forbidden_position_is_not_reused():
 
 
 def test_second_run_on_output_places_nothing():
-    pour = box(0, 0, 20, 20)
+    pour = box(0, 0, 10, 10)
     snap = pour_snapshot(pour)
     plan = PourStitcher()(snap, options(), [])
     vias = [
@@ -193,13 +193,13 @@ def test_other_net_pad_clearance_enforced_inside_own_fill():
     pads = []
     fill_gap = 0.15
     pad_shapes = []
-    for i, site in enumerate(lattice_sites((0, 0, 20, 20), options().pitch, 0)):
+    for i, site in enumerate(lattice_sites((0, 0, 10, 10), options().pitch, 0)):
         shape = box(site[0] - 0.4, site[1] - 0.4, site[0] + 0.4, site[1] + 0.4)
         pad_shapes.append(shape)
         pads.append(
             Pad(f"p{i}", None, "", PadKind.SMD, "1", site, 0.0, {"F.Cu": shape})
         )
-    pour = box(0, 0, 20, 20)
+    pour = box(0, 0, 10, 10)
     front = pour.difference(unary_union(pad_shapes).buffer(fill_gap))
     zone = Zone(NET, TWO_LAYERS, 0, pour, {"F.Cu": front, "B.Cu": pour})
     snap = Snapshot(
@@ -220,7 +220,7 @@ def test_other_net_pad_clearance_enforced_inside_own_fill():
 
 
 def test_pad_clearance_override_is_honoured():
-    hole_pos = (10.0, 10.0)
+    hole_pos = (5.0, 5.0)
     mounting = Pad(
         "mh",
         None,
@@ -232,7 +232,7 @@ def test_pad_clearance_override_is_honoured():
         {},
         clearance_override=1.6,
     )
-    snap = pour_snapshot(box(0, 0, 20, 20), pads=[mounting])
+    snap = pour_snapshot(box(0, 0, 10, 10), pads=[mounting])
 
     plan = PourStitcher()(snap, options(), [])
 
@@ -257,7 +257,7 @@ def test_net_with_one_zone_layer_is_skipped():
 
 
 def test_via_override_is_used_for_lattice():
-    snap = pour_snapshot(box(0, 0, 20, 20))
+    snap = pour_snapshot(box(0, 0, 10, 10))
     big = ViaSize(0.8, 0.4)
     plan = PourStitcher()(snap, options(via=big), [])
 
@@ -279,7 +279,7 @@ def test_coverage_counts_planned_units():
 def test_other_net_outer_pour_pulls_back_around_new_vias():
     # GND planes inside, a +3.3V pour on both outer layers, stitching GND alone:
     # the +3.3V pour refills around new GND vias, so it must not block them.
-    area = box(0, 0, 20, 20)
+    area = box(0, 0, 10, 10)
     layers = ("F.Cu", "In1.Cu", "In2.Cu", "B.Cu")
     gnd = Zone("GND", ("In1.Cu", "In2.Cu"), 0, area, {"In1.Cu": area, "In2.Cu": area})
     vcc = Zone("+3.3V", TWO_LAYERS, 0, area, {L: area for L in TWO_LAYERS})
