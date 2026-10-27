@@ -81,6 +81,9 @@ class UnfixableSpot:
     net: str
     reason: str
     layer: str | None = None
+    # Radius around `position` of the copper the spot covers, such as its pad;
+    # the marker reaches past it so the pad can't hide it.
+    extent: float = 0.0
 
 
 @dataclass(frozen=True)

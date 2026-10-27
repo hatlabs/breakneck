@@ -26,7 +26,7 @@ The ground nets are the nets with zones on two or more inner layers. A board wit
 
 ### Pad stitching vias
 
-`padvia` gives every SMD pad over a zone of its own net on another copper layer a via and a short stub track into the net's plane or pour, unless the pad already reaches a same-net via within 1 mm through its tracks, pads or pour. The via goes on the side of the pad facing away from the footprint centre where there is room. `--nets GND +3.3V` limits it to those pads of the listed nets. Keep `--nets` when a net meant to join its plane at a single point, such as a star ground, has a zone under its pads; leave that net out of the list.
+`padvia` gives every SMD pad with its own net's fill within reach on another copper layer a via and a short stub track into the net's plane or pour, unless the pad already reaches a same-net via or through-hole pad within 1 mm, copper edge to copper edge, through its tracks, pads or pour. Only fill the via fits in counts: a sliver narrower than the via, such as a strip of pour left under a same-net track, doesn't select the pad. The via goes on the side of the pad facing away from the footprint centre where there is room. `--nets GND +3.3V` limits it to those pads of the listed nets. Keep `--nets` when a net meant to join its plane at a single point, such as a star ground, has a zone under its pads; leave that net out of the list.
 
 ### Pour stitching vias
 
@@ -102,17 +102,17 @@ Each placement run:
 1. Refills the zones, so the planner sees current fills.
 2. Plans the vias from a snapshot of the board.
 3. Checks the plan with `kicad-cli pcb drc` on a temporary copy of the board, against a DRC run on an unmodified copy. Vias implicated in new violations are dropped, and the planner tries again without those spots, for up to five rounds.
-4. Commits the remaining vias, their stubs and any markers as one undo step, then refills the zones. If the board was edited in KiCad while the run was going, nothing is committed and the run has to be repeated.
+4. Commits the remaining vias, their stubs and any markers as one undo step, replacing the markers of earlier runs, then refills the zones. If the board was edited in KiCad while the run was going, nothing is committed and the run has to be repeated.
 
 Spots that need attention get markers on User.Eco2:
 
-- an X where no via fits (`returnvia` and `padvia`);
+- an X where no via fits (`returnvia` and `padvia`); on a `padvia` pad its arms reach past the pad, so copper drawn in front can't hide it;
 - a + at a forced via (`returnvia --force`);
 - a square at a new DRC violation that couldn't be pinned on a single via.
 
 Other nets' pours are not obstacles, so a single via can cut a narrow neck of another net's pour. DRC reports that as unconnected items or isolated copper and names the pour's pads or zones, not the via. breakneck counts these violations per net, in DRC of the board as it is and with the planned vias added. When a net's count goes up, the run commits nothing and exits with an error naming the net and listing the violations. An existing violation that DRC reports at different items after the refill leaves the count unchanged, so it gets a marker but doesn't stop the run. `--allow-splits` (on `returnvia`, `padvia` and `pourstitch`) commits anyway, with a square marker at each violation for fixing by hand. A dry run lists them without failing.
 
-`pourstitch` doesn't mark uncovered spots; its heatmap shows them as areas. `breakneck clear` removes the markers.
+`pourstitch` doesn't mark uncovered spots; its heatmap shows them as areas. Each placing `returnvia`, `padvia` or `pourstitch` run replaces the previous markers, whichever command made them: it removes every shape on User.Eco2, hand-drawn ones included, in the same undo step, also when it places nothing. So after `padvia` then `pourstitch`, only `pourstitch`'s markers remain. `--check` runs leave the markers alone. A dry run removes nothing. `breakneck clear` removes the markers without a run.
 
 `returnvia --force` adds a second pass: every via still without a return gets one at the spot with the most clearance, never overlapping other-net copper. These vias may violate clearance. They survive the DRC check despite that, and get a marker so you can fix them by hand.
 
