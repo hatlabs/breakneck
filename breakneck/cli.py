@@ -1,4 +1,6 @@
 import argparse
+import os
+import sys
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -517,7 +519,21 @@ def execute_pourstitch(args):
         )
 
 
+DEFAULT_LOG_LEVEL = "INFO"
+LOG_LEVEL_VARIABLE = "LOGURU_LEVEL"
+
+
+def configure_logging() -> None:
+    """Log to stderr at INFO, or at the level in LOGURU_LEVEL.
+
+    Loguru's own default sink logs at DEBUG.
+    """
+    logger.remove()
+    logger.add(sys.stderr, level=os.environ.get(LOG_LEVEL_VARIABLE, DEFAULT_LOG_LEVEL))
+
+
 def main():
+    configure_logging()
     args = parse_args()
 
     match args.command:

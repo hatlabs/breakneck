@@ -232,3 +232,33 @@ def test_command_without_the_place_extra_exits_with_the_install_hint(
 
     assert exit_info.value.code == 1
     assert any("uv tool install 'breakneck[place]'" in line for line in lines)
+
+
+@pytest.fixture
+def restore_default_sink():
+    yield
+    logger.remove()
+    logger.add(sys.stderr)
+
+
+@pytest.mark.usefixtures("restore_default_sink")
+def test_cli_logs_info_by_default(monkeypatch, capsys):
+    monkeypatch.delenv("LOGURU_LEVEL", raising=False)
+
+    cli.configure_logging()
+    logger.debug("per-via detail")
+    logger.info("summary")
+
+    err = capsys.readouterr().err
+    assert "summary" in err
+    assert "per-via detail" not in err
+
+
+@pytest.mark.usefixtures("restore_default_sink")
+def test_loguru_level_shows_debug(monkeypatch, capsys):
+    monkeypatch.setenv("LOGURU_LEVEL", "DEBUG")
+
+    cli.configure_logging()
+    logger.debug("per-via detail")
+
+    assert "per-via detail" in capsys.readouterr().err
