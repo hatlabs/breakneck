@@ -39,6 +39,7 @@ dev = [
     "pytest>=8.3.4",
     # The pourstitch and render tests import the place extra at collection.
     "breakneck[place]",
+    "pytest-xdist>=3.8.0",
 ]
 
 [build-system]
@@ -47,3 +48,5 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Parallel by default; pass `-n 0` to run serially (e.g. for pdb).
+addopts = "-n auto"
