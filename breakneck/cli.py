@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+from collections import Counter
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -12,7 +13,16 @@ from loguru import logger
 
 import breakneck.footprint
 import breakneck.overlay
-from breakneck.commit import Marker, MarkerKind, eco2_segment, marker_items
+from breakneck.clearvias import stitching_vias
+from breakneck.commit import (
+    Marker,
+    MarkerKind,
+    commit_label,
+    eco2_segment,
+    marker_items,
+    push_tolerant,
+    refill_after_commit,
+)
 from breakneck.overlay import DEFAULT_OVERLAY_LAYERS
 from breakneck.padvia import PadviaOptions, plan_padvia
 from breakneck.placement import (
@@ -419,6 +429,18 @@ def parse_args():
         default=list(DEFAULT_OVERLAY_LAYERS),
         help="User layers to remove breakneck overlays from",
     )
+    clear_parser.add_argument(
+        "--vias",
+        action="store_true",
+        help="Also remove unlocked vias touching a pour of their own net that no "
+        "track or pad ties down",
+    )
+    clear_parser.add_argument(
+        "--nets",
+        nargs="+",
+        metavar="NET",
+        help="Nets whose vias --vias removes (default: every net with a zone)",
+    )
     returnvia_parser = subparsers.add_parser(
         "returnvia", help="Place a ground return via near every signal via"
     )
@@ -449,7 +471,10 @@ def parse_args():
     )
     _add_allow_splits_argument(returnvia_parser)
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.command == "clear" and args.nets and not args.vias:
+        clear_parser.error("--nets requires --vias")
+    return args
 
 
 def execute_clear(args):
@@ -469,16 +494,58 @@ def execute_clear(args):
         )
     )
 
-    if not eco2_shapes and not images:
+    vias = (
+        _find_and_log_stitching_vias(board, args.nets, args.dry_run)
+        if args.vias
+        else []
+    )
+
+    if not eco2_shapes and not images and not vias:
         logger.info("Nothing to clear")
         return
 
     commit = board.begin_commit()
-    board.remove_items([*eco2_shapes, *images])
+    board.remove_items([*eco2_shapes, *images, *vias])
     if args.dry_run:
         board.drop_commit(commit)
-    else:
-        board.push_commit(commit)
+        return
+    push_tolerant(board, commit, commit_label("clear"))
+    if vias:
+        # Close the fills over the holes the removed vias leave.
+        refill_after_commit(kicad, board)
+
+
+def _find_and_log_stitching_vias(
+    board: kipy.board.Board, nets: Sequence[str] | None, dry_run: bool
+) -> list[kipy.board_types.Via]:
+    snapshot = Snapshot.from_board(board)
+    _warn_unclearable_nets(snapshot, nets)
+    found = stitching_vias(snapshot, nets)
+    if found:
+        counts = Counter(v.net for v in found)
+        logger.info(
+            f"{'Would remove' if dry_run else 'Removing'} stitching vias: "
+            + ", ".join(f"{n} on {net}" for net, n in counts.items())
+        )
+    ids = {v.id for v in found}
+    return [v for v in board.get_vias() if v.id.value in ids]
+
+
+def _warn_unclearable_nets(snapshot: Snapshot, nets: Sequence[str] | None) -> None:
+    zoned = {z.net for z in snapshot.copper_zones}
+    selected = zoned if nets is None else set(nets)
+    for net in sorted(selected - zoned):
+        logger.warning(f"No copper zone on net {net}; it has no vias to clear")
+    unfilled = Counter(
+        z.net for z in snapshot.copper_zones if z.net in selected and not z.fills
+    )
+    for net, n in sorted(unfilled.items()):
+        logger.warning(
+            f"{n} zone{'s' if n > 1 else ''} of {net} "
+            f"{'have' if n > 1 else 'has'} no fill, so vias that touch only "
+            f"{'them' if n > 1 else 'it'} stay; press B in KiCad to refill zones "
+            "and run again"
+        )
 
 
 def execute_padvia(args):

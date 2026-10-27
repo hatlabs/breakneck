@@ -731,7 +731,10 @@ def test_clear_removes_the_returnvia_overlays(fakes, tmp_path, monkeypatch):
 
     cli.execute_clear(
         argparse.Namespace(
-            overlay_layers=list(overlay.DEFAULT_OVERLAY_LAYERS), dry_run=False
+            overlay_layers=list(overlay.DEFAULT_OVERLAY_LAYERS),
+            dry_run=False,
+            vias=False,
+            nets=None,
         )
     )
 
