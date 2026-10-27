@@ -29,11 +29,11 @@ from breakneck.returnvia import (
     ReferencePlane,
     ReturnViaOptions,
     ViaReferences,
-    plan_return_vias,
     reference_outlines,
     resolve_ground_nets,
     via_references,
 )
+from breakneck.returnvia_planner import ReturnViaPlanner
 from breakneck.snapshot import (
     PadKind,
     Snapshot,
@@ -377,7 +377,7 @@ def execute(
         snapshot, plan = measure_only(kicad, board)
     else:
         result = run_placement(
-            plan_return_vias,
+            ReturnViaPlanner(),
             options,
             RunSettings(COMMAND, dry_run, kicad_cli, allow_splits=allow_splits),
             kicad,
