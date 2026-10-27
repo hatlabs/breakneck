@@ -14,12 +14,21 @@ from dataclasses import dataclass
 from enum import Enum
 
 import numpy as np
+import numpy.typing as npt
 from scipy import ndimage
 from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
 
 from breakneck.plan import QUANTISATION, THERMAL_REACH
-from breakneck.raster import BoolMap, FloatMap, Grid, Pixel, geodesic, touch
+from breakneck.raster import (
+    BoolMap,
+    FloatMap,
+    Grid,
+    Pixel,
+    geodesic,
+    geodesic_in,
+    touch,
+)
 from breakneck.returnvia import (
     OUTSIDE_GROUND,
     ReferencePlane,
@@ -32,6 +41,16 @@ from breakneck.snapshot import PadKind, Point2, Snapshot
 # two fill pixels that meet at a corner.
 VOID_CONNECTIVITY = ndimage.generate_binary_structure(2, 1)
 ADJACENT = np.ones((3, 3), bool)
+
+
+# Fill pixels next to a via's void, as row and column indices, and the
+# straight hop (mm) from the via's centre to each.
+Entries = tuple[npt.NDArray[np.intp], npt.NDArray[np.intp], FloatMap]
+
+
+def served_within(distance: float) -> float:
+    """The largest return distance that serves a via end."""
+    return distance + QUANTISATION
 
 
 class NoBoardOutlineError(ValueError):
@@ -83,6 +102,9 @@ class ReturnFields:
         self.grid = Grid.covering(snapshot.board_outline.bounds)
         self._fills: dict[ReferencePlane, BoolMap] = {}
         self._fields: dict[ReferencePlane, FloatMap] = {}
+        self._entry_cache: dict[
+            tuple[Point2, ReferencePlane, float], Entries | None
+        ] = {}
 
     def fill(self, plane: ReferencePlane) -> BoolMap:
         if plane not in self._fills:
@@ -122,7 +144,7 @@ class ReturnFields:
         """
         snap = self.snapshot
         candidates = [
-            (v.position, Point(v.position).buffer(v.diameter / 2))
+            (v.position, _via_shape(v.position, v.diameter))
             for v in snap.vias
             if v.net == plane.ground
         ] + [
@@ -133,19 +155,72 @@ class ReturnFields:
             and p.drill
             and plane.layer in p.shapes
         ]
-        fill = self.fill(plane)
         reached = [(c, shape.buffer(THERMAL_REACH)) for c, shape in candidates]
-        return [(c, disc) for c, disc in reached if touch(self.grid, fill, disc)]
+        return [(c, disc) for c, disc in reached if self._reaches_fill(plane, disc)]
+
+    def _reaches_fill(self, plane: ReferencePlane, disc: BaseGeometry) -> bool:
+        return bool(touch(self.grid, self.fill(plane), disc))
 
     def distance_at(
         self, position: Point2, plane: ReferencePlane, distance: float
     ) -> float | None:
-        """Return distance of a via at `position`; None with no fill near it.
+        """Return distance of a via at `position`; None with no fill near it."""
+        entries = self._entries(position, plane, distance)
+        if entries is None:
+            return None
+        rr, cc, hops = entries
+        return float(np.min(self.field(plane)[rr, cc] + hops, initial=math.inf))
+
+    def distance_from(
+        self,
+        centre: Point2,
+        diameter: float,
+        position: Point2,
+        plane: ReferencePlane,
+        distance: float,
+    ) -> float:
+        """`distance_at` with a via of `diameter` at `centre` as the only return.
+
+        The field is limited to the served threshold, so beyond it this is
+        inf. It is the same field `field` builds from that via, on less of
+        the plane, so a via served here is served once the via is added.
+        """
+        entries = self._entries(position, plane, distance)
+        disc = _via_shape(centre, diameter).buffer(THERMAL_REACH)
+        if entries is None or not self._reaches_fill(plane, disc):
+            return math.inf
+        g = self.grid
+        limit = served_within(distance)
+        win = g.window(g.index(centre), limit)
+        inside = g.mask(disc, win)
+        mask = self.fill(plane)[win] | inside
+        seeds = [
+            (r - win[0].start, c - win[1].start)
+            for r, c in self._seeds(centre, win, inside)
+        ]
+        field = geodesic_in(mask, [s for s in seeds if mask[s]], g.pixel, limit)
+        rr, cc, hops = entries
+        rr, cc = rr - win[0].start, cc - win[1].start
+        here = (rr >= 0) & (rr < mask.shape[0]) & (cc >= 0) & (cc < mask.shape[1])
+        return float(np.min(field[rr[here], cc[here]] + hops[here], initial=math.inf))
+
+    def _entries(
+        self, position: Point2, plane: ReferencePlane, distance: float
+    ) -> Entries | None:
+        """The ways into the fill from a via at `position`: pixels and the
+        straight hop from its centre to each. None with no fill near it.
 
         The via's void is the non-fill region around its centre, within
-        `distance`; every fill pixel next to it is a way in, reached by a
-        straight hop from the centre.
+        `distance`; every fill pixel next to it is a way in.
         """
+        key = (position, plane, distance)
+        if key not in self._entry_cache:
+            self._entry_cache[key] = self._find_entries(position, plane, distance)
+        return self._entry_cache[key]
+
+    def _find_entries(
+        self, position: Point2, plane: ReferencePlane, distance: float
+    ) -> Entries | None:
         g = self.grid
         centre = g.index(position)
         if not g.contains(centre):
@@ -155,12 +230,9 @@ class ReturnFields:
         if not (fill & near).any():
             return None
         local = (centre[0] - win[0].start, centre[1] - win[1].start)
-        edge = _void_edge(fill, near, local)
-        rr, cc = np.nonzero(edge)
-        if not len(rr):
-            return math.inf
+        rr, cc = np.nonzero(_void_edge(fill, near, local))
         hops = np.hypot(g.xs[win[1]][cc] - position[0], g.ys[win[0]][rr] - position[1])
-        return float(np.min(self.field(plane)[win][rr, cc] + hops))
+        return rr + win[0].start, cc + win[1].start, hops
 
     def void(
         self, position: Point2, plane: ReferencePlane, distance: float
@@ -199,7 +271,7 @@ class ReturnFields:
                         layers,
                         plane,
                         d,
-                        d <= distance + QUANTISATION,
+                        d <= served_within(distance),
                         outcome,
                     )
                 )
@@ -217,6 +289,10 @@ class ReturnFields:
                 if c.plane is None
             ]
         return out
+
+
+def _via_shape(position: Point2, diameter: float) -> BaseGeometry:
+    return Point(position).buffer(diameter / 2)
 
 
 def _void(fill: BoolMap, near: BoolMap, centre: Pixel) -> BoolMap:

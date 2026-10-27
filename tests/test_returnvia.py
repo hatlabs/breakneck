@@ -13,15 +13,15 @@ from breakneck.plan import (
     OTHER_NET_CLEARANCE,
     SAME_NET_PAD_GAP,
 )
+from breakneck.returnpath import measure_returns
 from breakneck.returnvia import (
     NoGroundNetsError,
     ReferencePlane,
     ReturnViaOptions,
-    plan_return_vias,
     resolve_ground_nets,
-    unserved_vias,
     via_references,
 )
+from breakneck.returnvia_planner import ReturnViaPlanner
 from breakneck.snapshot import (
     Pad,
     PadKind,
@@ -55,6 +55,24 @@ def via(net, x, y, dia=0.6, drill=0.3):
     return Via(id=f"{net}@{x},{y}", net=net, position=(x, y), diameter=dia, drill=drill)
 
 
+SIGNAL_ID = "signal:"
+
+
+def signal(net, x, y):
+    """A via that `snapshot` ties to F.Cu and B.Cu, so it changes layers."""
+    return replace(via(net, x, y), id=f"{SIGNAL_ID}{net}@{x},{y}")
+
+
+def ties(vias):
+    """F.Cu and B.Cu stubs within each signal via's own copper."""
+    return [
+        track(v.net, L, v.position, (v.position[0] - 0.1, v.position[1]))
+        for v in vias
+        if v.id.startswith(SIGNAL_ID)
+        for L in ("F.Cu", "B.Cu")
+    ]
+
+
 def track(net, layer, start, end, width=0.2):
     return Track(
         id=f"{net}:{start}-{end}",
@@ -86,7 +104,7 @@ def snapshot(vias=(), tracks=(), pads=(), zones=None, via_sizes=None):
     return Snapshot(
         copper_layers=FOUR_LAYERS,
         pads=list(pads),
-        tracks=list(tracks),
+        tracks=[*ties(vias), *tracks],
         vias=list(vias),
         zones=list(zones),
         edge_paths=edge,
@@ -95,7 +113,11 @@ def snapshot(vias=(), tracks=(), pads=(), zones=None, via_sizes=None):
 
 
 def plan(snap, forbidden=(), **kwargs):
-    return plan_return_vias(snap, ReturnViaOptions(**kwargs), list(forbidden))
+    return ReturnViaPlanner()(snap, ReturnViaOptions(**kwargs), list(forbidden))
+
+
+def unserved(snap, ground_nets=None, distance=1.5):
+    return [r for r in measure_returns(snap, ground_nets, distance) if not r.served]
 
 
 def disk(position, radius=VIA_RADIUS):
@@ -103,7 +125,7 @@ def disk(position, radius=VIA_RADIUS):
 
 
 def test_signal_via_gets_return_within_distance_clear_of_other_net_track():
-    sig = via("SIG", 10, 10)
+    sig = signal("SIG", 10, 10)
     other = track("X", "F.Cu", (10.9, 5), (10.9, 15))
     result = plan(snapshot(vias=[sig], tracks=[other]))
 
@@ -122,7 +144,7 @@ def test_default_distance_is_one_and_a_half_mm():
 
 
 def test_ground_via_one_mm_away_serves_the_signal_via():
-    result = plan(snapshot(vias=[via("SIG", 10, 10), via("GND", 11, 10)]))
+    result = plan(snapshot(vias=[signal("SIG", 10, 10), via("GND", 11, 10)]))
     assert not result.units and not result.unfixable
 
 
@@ -134,17 +156,17 @@ def test_ground_pth_pad_counts_as_a_return():
         kind=PadKind.PTH,
         drill=0.4,
     )
-    result = plan(snapshot(vias=[via("SIG", 10, 10)], pads=[gnd_pad]))
+    result = plan(snapshot(vias=[signal("SIG", 10, 10)], pads=[gnd_pad]))
     assert not result.units and not result.unfixable
 
 
 def test_ground_via_of_another_ground_does_not_serve():
-    result = plan(snapshot(vias=[via("SIG", 30, 10), via("GND", 30.5, 10)]))
+    result = plan(snapshot(vias=[signal("SIG", 30, 10), via("GND", 30.5, 10)]))
     assert [u.net for u in result.units] == ["GND_ISO"]
 
 
 def test_via_in_isolated_ground_area_gets_isolated_ground_return():
-    result = plan(snapshot(vias=[via("SIG_ISO", 30, 10)]))
+    result = plan(snapshot(vias=[signal("SIG_ISO", 30, 10)]))
     assert [u.net for u in result.units] == ["GND_ISO"]
     assert ISO_AREA.contains(disk(result.units[0].position))
 
@@ -156,9 +178,12 @@ def test_ground_via_never_needs_a_return():
 
 def test_via_outside_every_ground_outline_is_unfixable_and_never_forced():
     zones = [zone("GND", INNER, GND_AREA)]
-    result = plan(snapshot(vias=[via("SIG", 35, 10)], zones=zones), force=True)
+    result = plan(snapshot(vias=[signal("SIG", 35, 10)], zones=zones), force=True)
     assert not result.units
-    assert [(s.position, s.net) for s in result.unfixable] == [((35, 10), "SIG")]
+    assert [(s.position, s.net, s.reason) for s in result.unfixable] == [
+        ((35, 10), "SIG", "outside every ground zone for F.Cu"),
+        ((35, 10), "SIG", "outside every ground zone for B.Cu"),
+    ]
 
 
 def test_outer_ground_zone_serves_where_no_inner_outline_does():
@@ -167,7 +192,7 @@ def test_outer_ground_zone_serves_where_no_inner_outline_does():
         zone("GND_ISO", ("F.Cu", "B.Cu"), ISO_AREA),
         zone("GND_ISO", ("In1.Cu", "In2.Cu"), box(0, 0, 1, 1)),
     ]
-    result = plan(snapshot(vias=[via("SIG", 30, 10)], zones=zones))
+    result = plan(snapshot(vias=[signal("SIG", 30, 10)], zones=zones))
     assert [u.net for u in result.units] == ["GND_ISO"]
 
 
@@ -179,19 +204,19 @@ def test_return_via_sits_inside_the_fill_on_every_required_layer():
         zone("GND", ("F.Cu",), GND_AREA, fills={"F.Cu": left}),
         zone("GND_ISO", INNER, ISO_AREA),
     ]
-    result = plan(snapshot(vias=[via("SIG", 10, 10)], zones=zones))
+    result = plan(snapshot(vias=[signal("SIG", 10, 10)], zones=zones))
     (u,) = result.units
     assert left.contains(disk(u.position))
 
 
 def test_netclass_via_size_with_override():
-    snap = snapshot(vias=[via("SIG", 10, 10)], via_sizes={"GND": ViaSize(0.7, 0.35)})
+    snap = snapshot(vias=[signal("SIG", 10, 10)], via_sizes={"GND": ViaSize(0.7, 0.35)})
     assert plan(snap).units[0].size == ViaSize(0.7, 0.35)
     assert plan(snap, via=ViaSize(0.5, 0.25)).units[0].size == ViaSize(0.5, 0.25)
 
 
 def test_one_return_via_serves_several_nearby_signal_vias():
-    result = plan(snapshot(vias=[via("A", 10, 10), via("B", 10, 11.2)]))
+    result = plan(snapshot(vias=[signal("A", 10, 10), signal("B", 10, 11.2)]))
     assert len(result.units) == 1
 
 
@@ -208,10 +233,12 @@ def via_keepout(outline):
 
 def test_return_via_avoids_a_via_keepout_rule_area():
     grounds = [zone("GND", INNER, GND_AREA), zone("GND_ISO", INNER, ISO_AREA)]
-    (nearest,) = plan(snapshot(vias=[via("SIG", 10, 10)], zones=grounds)).units
+    (nearest,) = plan(snapshot(vias=[signal("SIG", 10, 10)], zones=grounds)).units
     keepout = Point(nearest.position).buffer(0.4)
 
-    snap = snapshot(vias=[via("SIG", 10, 10)], zones=[*grounds, via_keepout(keepout)])
+    snap = snapshot(
+        vias=[signal("SIG", 10, 10)], zones=[*grounds, via_keepout(keepout)]
+    )
     (u,) = plan(snap).units
 
     assert not disk(u.position).intersects(keepout)
@@ -225,7 +252,7 @@ def test_return_vias_of_different_grounds_keep_clearance_from_each_other():
         zone(net, INNER, area, fills=dict.fromkeys(INNER, strips[net]))
         for net, area in (("GND", GND_AREA), ("GND_ISO", ISO_AREA))
     ]
-    vias = [via("A", 19.2, 10), via("B", 20.8, 10)]
+    vias = [signal("A", 19.2, 10), signal("B", 20.8, 10)]
     result = plan(snapshot(vias=vias, zones=grounds))
 
     gnd, iso = sorted(result.units, key=lambda u: u.net)
@@ -235,7 +262,7 @@ def test_return_vias_of_different_grounds_keep_clearance_from_each_other():
 
 
 def test_forbidden_position_is_not_reused():
-    snap = snapshot(vias=[via("SIG", 10, 10)])
+    snap = snapshot(vias=[signal("SIG", 10, 10)])
     (first,) = plan(snap).units
     (second,) = plan(snap, forbidden=[first.position]).units
     assert math.dist(first.position, second.position) >= FORBIDDEN_RADIUS
@@ -246,14 +273,14 @@ def test_forbidden_position_is_not_reused():
 def test_other_net_pad_clearance_override_is_enforced_on_every_layer(layer):
     override = 1.0
     other = pad("X", (11.2, 10), {layer: box(11, 9, 11.4, 11)}, override=override)
-    result = plan(snapshot(vias=[via("SIG", 10, 10)], pads=[other]))
+    result = plan(snapshot(vias=[signal("SIG", 10, 10)], pads=[other]))
     (u,) = result.units
     assert disk(u.position).distance(other.shapes[layer]) >= override - EPS
 
 
 def test_mounting_hole_clearance_override_is_enforced():
     hole = pad("", (13, 10), {}, kind=PadKind.NPTH, drill=3.2, override=1.6)
-    result = plan(snapshot(vias=[via("SIG", 10, 10)], pads=[hole]))
+    result = plan(snapshot(vias=[signal("SIG", 10, 10)], pads=[hole]))
     (u,) = result.units
     assert disk(u.position).distance(disk(hole.position, 1.6)) >= 1.6 - EPS
 
@@ -261,7 +288,7 @@ def test_mounting_hole_clearance_override_is_enforced():
 def test_return_via_keeps_clear_of_board_edge():
     # The only room left of the track is too close to the board edge.
     wall = track("X", "F.Cu", (2.1, 5), (2.1, 15), width=1.8)
-    result = plan(snapshot(vias=[via("SIG", 0.6, 10)], tracks=[wall]))
+    result = plan(snapshot(vias=[signal("SIG", 0.6, 10)], tracks=[wall]))
     assert not result.units
     assert [s.position for s in result.unfixable] == [(0.6, 10)]
 
@@ -271,7 +298,7 @@ def test_force_never_places_a_via_in_or_near_a_board_cutout():
     # the slot is the only spot with clearance.
     slot = box(10.6, 9.4, 12, 10.6)
     blanket = pad("X", (10, 10), {"F.Cu": box(5, 5, 15, 15).difference(slot)})
-    snap = snapshot(vias=[via("SIG", 10, 10)], pads=[blanket])
+    snap = snapshot(vias=[signal("SIG", 10, 10)], pads=[blanket])
     assert plan(snap, force=True).units  # without the cutout the slot is used
 
     slot_edge = list(slot.exterior.coords)
@@ -292,14 +319,14 @@ def _crowded(signal_y=10.0, pitch=1.0, width=0.2):
 
 
 def test_crowded_via_without_force_is_unfixable():
-    result = plan(snapshot(vias=[via("SIG", 10, 10)], tracks=_crowded()))
+    result = plan(snapshot(vias=[signal("SIG", 10, 10)], tracks=_crowded()))
     assert not result.units
     assert [s.position for s in result.unfixable] == [(10, 10)]
 
 
 def test_force_places_crowded_via_at_maximum_clearance():
     tracks = _crowded()
-    result = plan(snapshot(vias=[via("SIG", 10, 10)], tracks=tracks), force=True)
+    result = plan(snapshot(vias=[signal("SIG", 10, 10)], tracks=tracks), force=True)
 
     (u,) = result.units
     assert u.forced and u.net == "GND"
@@ -312,7 +339,7 @@ def test_force_places_crowded_via_at_maximum_clearance():
 
 def test_force_skips_and_reports_spot_that_would_overlap_other_net_copper():
     blanket = track("X", "F.Cu", (5, 10), (15, 10), width=5)
-    result = plan(snapshot(vias=[via("SIG", 10, 10)], tracks=[blanket]), force=True)
+    result = plan(snapshot(vias=[signal("SIG", 10, 10)], tracks=[blanket]), force=True)
     assert not result.units
     assert [s.position for s in result.unfixable] == [(10, 10)]
 
@@ -320,7 +347,7 @@ def test_force_skips_and_reports_spot_that_would_overlap_other_net_copper():
 def test_force_never_enters_a_mounting_hole_keep_off():
     # The keep-off (hole radius 0.5 + 2.5 override) covers every reachable spot.
     hole = pad("", (10, 11), {}, kind=PadKind.NPTH, drill=1.0, override=2.5)
-    result = plan(snapshot(vias=[via("SIG", 10, 10)], pads=[hole]), force=True)
+    result = plan(snapshot(vias=[signal("SIG", 10, 10)], pads=[hole]), force=True)
     assert not result.units
     assert [s.position for s in result.unfixable] == [(10, 10)]
 
@@ -345,10 +372,11 @@ def _blanket(*pockets):
 
 
 def test_force_keeps_hole_to_hole_from_an_existing_via():
-    # A ground via 1.55 mm from the signal via doesn't serve it, but its hole
+    # A ground via 1.75 mm from the signal via doesn't serve it, but its hole
     # is 0.55 mm from the pocket centre.
-    gnd = via("GND", 11.55, 10)
-    snap = snapshot(vias=[via("SIG", 10, 10), gnd], pads=[_blanket(_pocket())])
+    gnd = via("GND", 11.75, 10)
+    pocket = _pocket((11.2, 10))
+    snap = snapshot(vias=[signal("SIG", 10, 10), gnd], pads=[_blanket(pocket)])
 
     result = plan(snap, force=True)
 
@@ -362,7 +390,7 @@ def test_force_keeps_hole_to_hole_from_an_earlier_forced_via():
     # Signal vias 2.55 mm apart, each with a pocket 1 mm away; the pockets are
     # 0.55 mm apart, so the second forced via lands next to the first.
     pockets = _blanket(_pocket((11, 10)), _pocket((11.55, 10)))
-    snap = snapshot(vias=[via("A", 10, 10), via("B", 12.55, 10)], pads=[pockets])
+    snap = snapshot(vias=[signal("A", 10, 10), signal("B", 12.55, 10)], pads=[pockets])
 
     result = plan(snap, force=True)
 
@@ -375,7 +403,7 @@ def test_force_keeps_hole_to_hole_from_an_earlier_forced_via():
 
 def test_force_keeps_out_of_same_net_pads():
     gnd_pad = pad("GND", (11.25, 10), {"F.Cu": box(11.15, 9.95, 11.35, 10.05)})
-    snap = snapshot(vias=[via("SIG", 10, 10)], pads=[_blanket(_pocket()), gnd_pad])
+    snap = snapshot(vias=[signal("SIG", 10, 10)], pads=[_blanket(_pocket()), gnd_pad])
 
     result = plan(snap, force=True)
 
@@ -386,11 +414,11 @@ def test_force_keeps_out_of_same_net_pads():
 
 
 def test_force_uses_a_spot_inside_the_zone_outline_but_outside_the_fill():
-    # The fill has a hole around the signal via wider than the reach, so no
-    # full-clearance spot exists.
-    fill = GND_AREA.difference(Point(10, 10).buffer(3))
+    # The fill has a hole around the signal via that leaves no full-clearance
+    # spot within reach, though fill lies within the distance.
+    fill = GND_AREA.difference(Point(10, 10).buffer(1.3))
     grounds = [zone("GND", INNER, GND_AREA, fills=dict.fromkeys(INNER, fill))]
-    snap = snapshot(vias=[via("SIG", 10, 10)], zones=grounds)
+    snap = snapshot(vias=[signal("SIG", 10, 10)], zones=grounds)
     assert not plan(snap).units
 
     (u,) = plan(snap, force=True).units
@@ -400,42 +428,44 @@ def test_force_uses_a_spot_inside_the_zone_outline_but_outside_the_fill():
     assert not fill.intersects(disk(u.position))
 
 
-def test_one_forced_via_serves_a_nearby_crowded_via_too():
-    vias = [via("A", 10, 10), via("B", 10, 11)]
+def test_one_forced_via_stands_in_for_a_nearby_crowded_via_too():
+    vias = [signal("A", 10, 10), signal("B", 10, 11)]
     result = plan(snapshot(vias=vias, tracks=_crowded()), force=True)
-    assert len(result.units) == 1 and result.units[0].forced
-    assert not result.unfixable
+    (u,) = result.units
+    assert u.forced
+    assert [(s.net, s.reason) for s in result.unfixable] == [
+        ("B", f"relies on forced via at ({u.position[0]:.3f}, {u.position[1]:.3f})")
+    ]
 
 
-def test_planned_returns_satisfy_the_straight_line_check():
+def test_planned_returns_satisfy_the_check():
     # A keep-off around the via leaves room only on the outermost ring, where
     # rounding to 1 µm would push this off-grid position past the distance.
     centre = (10.0006, 10)
     hole = pad("", centre, {}, kind=PadKind.NPTH, drill=0.4, override=0.98)
-    snap = snapshot(vias=[via("SIG", *centre)], pads=[hole])
+    snap = snapshot(vias=[signal("SIG", *centre)], pads=[hole])
     result = plan(snap)
 
-    placed = [via(u.net, *u.position) for u in result.units]
-    after = snapshot(vias=[*snap.vias, *placed], pads=[hole])
-    assert {u.position for u in unserved_vias(after, None, 1.5)} == {
+    after = returnvia_command.with_returns(snap, result.units)
+    assert {r.position for r in unserved(after)} == {
         s.position for s in result.unfixable
     }
 
 
 def test_planner_acts_on_exactly_the_unserved_vias():
     zones = [zone("GND", INNER, GND_AREA), zone("GND_ISO", INNER, box(20, 0, 30, 20))]
-    served = via("SERVED", 5, 5)
-    needs = via("NEEDS", 10, 10)
-    iso = via("ISO", 25, 10)
-    outside = via("OUTSIDE", 35, 10)
+    served = signal("SERVED", 5, 5)
+    needs = signal("NEEDS", 10, 10)
+    iso = signal("ISO", 25, 10)
+    outside = signal("OUTSIDE", 35, 10)
     snap = snapshot(
         vias=[served, via("GND", 5.8, 5), needs, iso, outside, via("GND_ISO", 28, 10)],
         zones=zones,
     )
     options = ReturnViaOptions()
 
-    reported = {u.net for u in unserved_vias(snap, ["GND", "GND_ISO"], 1.5)}
-    result = plan_return_vias(snap, options, [])
+    reported = {r.net for r in unserved(snap, ["GND", "GND_ISO"])}
+    result = ReturnViaPlanner()(snap, options, [])
     acted_on = {s.net for s in result.unfixable} | {
         v.net
         for v in (needs, iso)
@@ -452,24 +482,28 @@ TWO_LAYERS = ("F.Cu", "B.Cu")
 def two_layer_snapshot(vias=(), zones=()):
     edge = [[(0, 0), (BOARD_W, 0), (BOARD_W, BOARD_H), (0, BOARD_H), (0, 0)]]
     return Snapshot(
-        copper_layers=TWO_LAYERS, vias=list(vias), zones=list(zones), edge_paths=edge
+        copper_layers=TWO_LAYERS,
+        vias=list(vias),
+        tracks=ties(vias),
+        zones=list(zones),
+        edge_paths=edge,
     )
 
 
 def test_two_layer_board_falls_back_to_the_net_named_gnd():
     snap = two_layer_snapshot(
-        vias=[via("GND", 5, 5), via("SIG", 5.8, 5), via("FAR", 15, 15)],
+        vias=[via("GND", 5, 5), signal("SIG", 5.8, 5), signal("FAR", 15, 15)],
         zones=[zone("GND", TWO_LAYERS, GND_AREA)],
     )
 
     assert resolve_ground_nets(snap, None) == ["GND"]
-    assert [u.net for u in unserved_vias(snap, None, 1.5)] == ["FAR"]
+    assert {r.net for r in unserved(snap)} == {"FAR"}
     (u,) = plan(snap).units
     assert u.net == "GND"
 
 
 def test_gnd_with_only_vias_still_counts_as_the_ground():
-    snap = two_layer_snapshot(vias=[via("GND", 5, 5), via("SIG", 5.8, 5)])
+    snap = two_layer_snapshot(vias=[via("GND", 5, 5), signal("SIG", 5.8, 5)])
 
     assert resolve_ground_nets(snap, None) == ["GND"]
 
@@ -478,7 +512,7 @@ def test_gnd_with_only_vias_still_counts_as_the_ground():
 def test_ground_vias_are_never_unserved(ground_nets):
     snap = snapshot(vias=[via("GND", 10, 10), via("GND", 30, 10)])
 
-    assert unserved_vias(snap, ground_nets, 1.5) == []
+    assert unserved(snap, ground_nets) == []
 
 
 def test_no_ground_net_found_is_an_error():

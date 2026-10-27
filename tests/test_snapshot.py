@@ -173,46 +173,6 @@ def test_default_ground_nets_are_nets_with_two_inner_zone_layers():
     assert snap.default_ground_nets() == ["GND", "GND_ISO"]
 
 
-def test_overlapping_ground_outlines_resolve_to_higher_priority():
-    snap = Snapshot(
-        copper_layers=FOUR_LAYERS,
-        zones=[
-            zone("GND", ["In1.Cu", "In2.Cu"], box(0, 0, 20, 10), priority=0),
-            zone("GND_ISO", ["In1.Cu", "In2.Cu"], box(10, 0, 20, 10), priority=2),
-        ],
-    )
-    grounds = ["GND", "GND_ISO"]
-
-    assert snap.ground_net_at((5, 5), grounds) == "GND"
-    assert snap.ground_net_at((15, 5), grounds) == "GND_ISO"
-
-
-def test_ground_falls_back_to_outer_zones_then_none():
-    snap = Snapshot(
-        copper_layers=FOUR_LAYERS,
-        zones=[
-            zone("GND", ["In1.Cu", "In2.Cu"], box(0, 0, 10, 10)),
-            zone("GND_ISO", ["F.Cu", "B.Cu"], box(20, 0, 30, 10)),
-        ],
-    )
-    grounds = ["GND", "GND_ISO"]
-
-    assert snap.ground_net_at((25, 5), grounds) == "GND_ISO"
-    assert snap.ground_net_at((15, 5), grounds) is None
-
-
-def test_inner_ground_outline_wins_over_higher_priority_outer_zone():
-    snap = Snapshot(
-        copper_layers=FOUR_LAYERS,
-        zones=[
-            zone("GND", ["In1.Cu", "In2.Cu"], box(0, 0, 10, 10), priority=0),
-            zone("GND_ISO", ["F.Cu"], box(0, 0, 10, 10), priority=5),
-        ],
-    )
-
-    assert snap.ground_net_at((5, 5), ["GND", "GND_ISO"]) == "GND"
-
-
 def test_net_with_zone_on_one_layer_is_not_stitchable():
     snap = Snapshot(
         copper_layers=FOUR_LAYERS,

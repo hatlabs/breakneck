@@ -3,7 +3,7 @@
 import pytest
 from shapely.geometry import box
 
-from breakneck import padvia, returnvia
+from breakneck import padvia, returnvia_planner
 from breakneck.obstacles import Obstacles
 from breakneck.plan import (
     HOLE_TO_HOLE_GAP,
@@ -53,7 +53,7 @@ def snapshot(pads=(), zones=(), vias=()):
 
 
 def returnvia_accepts(snap, pos):
-    return returnvia._spot_ok(Obstacles(snap, []), pos, "GND", VIA)
+    return returnvia_planner._spot_ok(Obstacles(snap, []), pos, "GND", VIA)
 
 
 def padvia_accepts(snap, pos):

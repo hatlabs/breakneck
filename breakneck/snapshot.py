@@ -200,25 +200,6 @@ class Snapshot:
             >= MIN_GROUND_INNER_LAYERS
         )
 
-    def ground_net_at(self, position: Point2, ground_nets: Iterable[str]) -> str | None:
-        """The ground net serving `position`.
-
-        Inner-layer zone outlines are consulted first and outer ones only
-        where no inner outline contains the point; overlapping outlines
-        resolve to the highest zone priority.
-        """
-        grounds = set(ground_nets)
-        pt = Point(position)
-        candidates = [
-            z for z in self.copper_zones if z.net in grounds and z.outline.contains(pt)
-        ]
-        inner = set(self.inner_layers)
-        for on_layers in (inner, OUTER_COPPER):
-            hits = [z for z in candidates if on_layers & set(z.layers)]
-            if hits:
-                return max(hits, key=lambda z: z.priority).net
-        return None
-
     def via_size(self, net: str) -> ViaSize:
         return self.via_sizes.get(net, DEFAULT_VIA_SIZE)
 
