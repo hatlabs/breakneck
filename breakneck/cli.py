@@ -297,6 +297,7 @@ def execute_returnvia(args):
             check=args.check,
             kicad_cli=args.kicad_cli,
             allow_splits=args.allow_splits,
+            full_map=args.full_map,
         )
 
 
@@ -405,6 +406,11 @@ def parse_args():
     )
     _add_heatmap_arguments(
         returnvia_parser, "Only measure the existing returns; place no vias"
+    )
+    returnvia_parser.add_argument(
+        "--full-map",
+        action="store_true",
+        help="Map all copper, not only the copper around unserved via ends",
     )
     returnvia_parser.add_argument(
         "--kicad-cli", metavar="PATH", help="kicad-cli binary used for DRC"

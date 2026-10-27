@@ -4,7 +4,7 @@ and overlay the return distance under the copper of each via end layer."""
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 import kipy
 import kipy.board
@@ -18,7 +18,7 @@ from shapely.ops import unary_union
 from breakneck import overlay, render
 from breakneck.placement import RunSettings, measure_only, run_placement
 from breakneck.plan import QUANTISATION, PlannedUnit
-from breakneck.raster import CoverageMap
+from breakneck.raster import CoverageMap, Grid
 from breakneck.returnpath import (
     NoBoardOutlineError,
     Outcome,
@@ -48,6 +48,7 @@ UNREACHABLE_COLOUR = "#b44dff"
 # Pink stands out on both ends of the palette and on the board.
 RING_COLOUR = "#ff2a6d"
 COPPER_MAP_NET = "copper"
+SERVED_TITLE = "Return vias: every via end served within {distance:g} mm"
 # Reach past a via's edge over its antipad, the void around it in the plane.
 ANTIPAD_REACH = 0.3
 # Whole steps per threshold, so the step at the threshold falls between two.
@@ -193,6 +194,24 @@ def markers(
     }
 
 
+def ring_maps(
+    maps: Sequence[CoverageMap],
+    marks: Mapping[render.MapKey, render.Markers],
+    grid: Grid,
+) -> list[CoverageMap]:
+    """The maps cut to the copper inside their rings, which picks out the
+    unserved via ends; a map with no ring is dropped."""
+    out = []
+    for m in maps:
+        rings = marks[(m.net, m.layer)].rings
+        if not rings:
+            continue
+        inside = grid.mask(unary_union([Point(c).buffer(r) for c, r in rings]))
+        m.distance[~inside] = np.nan
+        out.append(m)
+    return out
+
+
 def log_results(
     references: Sequence[ViaReferences],
     results: Sequence[PlaneReturn],
@@ -228,14 +247,16 @@ def execute(
     check: bool = False,
     kicad_cli: str | None = None,
     allow_splits: bool = False,
+    full_map: bool = False,
     kicad: kipy.KiCad | None = None,
 ) -> None:
     """Run returnvia against the open board.
 
     `check` only measures the existing returns: no planning, no kicad-cli,
     no vias or markers. Planned vias count as returns in the measurement,
-    except forced ones. Overlays are placed in their own commit, also in a
-    dry run.
+    except forced ones. The heatmaps show only the copper around unserved
+    via ends, or with `full_map` all copper. Overlays are placed in their
+    own commit, also in a dry run.
     """
     kicad = kicad or kipy.KiCad()
     board = kicad.get_board()
@@ -265,16 +286,29 @@ def execute(
     marks = markers(results, maps, options.distance)
     if not maps:
         logger.info("No signal via changes layers: no heatmaps")
-    elif outputs.render is not None:
-        render.render_panels(
-            outputs.render,
-            fields.snapshot,
-            fields.grid,
-            maps,
-            marks,
-            options.distance,
-            STYLE,
-        )
+    elif not full_map:
+        maps = ring_maps(maps, marks, fields.grid)
+        if not maps:
+            logger.info("No unserved via ends: no heatmaps")
+    if outputs.render is not None:
+        if maps:
+            render.render_panels(
+                outputs.render,
+                fields.snapshot,
+                fields.grid,
+                maps,
+                marks,
+                options.distance,
+                STYLE,
+            )
+        else:
+            # Replaces the previous run's heatmap, which would show stale rings.
+            render.render_outline(
+                outputs.render,
+                fields.snapshot,
+                fields.grid,
+                SERVED_TITLE.format(distance=options.distance),
+            )
         logger.info(f"Wrote {outputs.render}")
 
     if outputs.overlay:

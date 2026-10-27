@@ -126,6 +126,7 @@ def test_returnvia_takes_the_heatmap_options(monkeypatch, tmp_path):
         "User.8",
         "--distance",
         "2",
+        "--full-map",
     ]
 
     cli.execute_returnvia(parsed(monkeypatch, argv))
@@ -138,6 +139,7 @@ def test_returnvia_takes_the_heatmap_options(monkeypatch, tmp_path):
         overlay_layers=("User.5", "User.6", "User.7", "User.8"),
     )
     assert kw["check"]
+    assert kw["full_map"]
 
 
 @pytest.mark.parametrize("argv", [["returnvia"], ["pourstitch", "--nets", "GND"]])
