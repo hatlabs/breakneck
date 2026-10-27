@@ -577,6 +577,57 @@ def test_via_end_shows_its_distance_over_its_whole_void(fakes):
     assert at(rgba(fakes, "F.Cu"), beyond_nearest_fill) == expected
 
 
+def test_shared_void_shows_its_worst_end(fakes):
+    # A served pin of the via's net shares the via's void; the via, farther
+    # from the return, is unserved. Its trace in the void reads its own
+    # distance, not the pin's smaller one.
+    pin = (SIG[0] + 1.6, SIG[1])
+    void = LineString([SIG, pin]).buffer(WIDE_ANTIPAD)
+    plain = BOARD.difference(void)
+    snap = snapshot(
+        returns=[("GND", (9.5, 5.0))], zones=[gnd_zone({L: plain for L in INNER})]
+    )
+    shapes = {L: Point(pin).buffer(PIN_RADIUS) for L in ("F.Cu", "B.Cu")}
+    snap.pads = [Pad("p", None, "SIG", PadKind.PTH, "1", pin, 0.8, shapes)]
+    trace = (SIG[0] + 0.8, SIG[1] + 0.4)
+    stub = Track(
+        "stub", "SIG", "F.Cu", 0.2, LineString([SIG, (SIG[0] + 1.0, SIG[1] + 0.4)])
+    )
+    snap.tracks = [*snap.tracks, stub]
+    fakes.snap = snap
+
+    run(Board(), overlay=True)
+
+    via = front_return(snap)
+    found = ReturnFields(snap).distance_at(
+        pin, ReferencePlane("In1.Cu", "GND"), DISTANCE
+    )
+    assert found is not None and found < via
+    (expected,) = palette_at(via)
+    assert at(rgba(fakes, "F.Cu"), trace) == expected
+
+
+def test_other_net_copper_in_a_vias_void_stays_unreachable(fakes):
+    # The via sits in a slot in In1; another net's track crosses the slot
+    # within --distance of it and has no path to a return there.
+    slot = box(4.0, 2.0, 6.0, 8.0)
+    in2 = BOARD.difference(antipads(SIG))
+    snap = snapshot(
+        returns=[("GND", (8.0, 5.0))],
+        zones=[gnd_zone({"In1.Cu": BOARD.difference(slot), "In2.Cu": in2})],
+    )
+    crossing = Track("x", "X", "F.Cu", 0.2, LineString([(5.6, 1.0), (5.6, 9.0)]))
+    snap.tracks = [*snap.tracks, crossing]
+    fakes.snap = snap
+
+    run(Board(), overlay=True, full_map=True)
+
+    image = rgba(fakes, "F.Cu")
+    (expected,) = palette_at(front_return(snap))
+    assert at(image, (SIG[0] - 0.5, SIG[1])) == expected
+    assert at(image, (5.6, 6.2)) == colour(STYLE.unreachable_colour)
+
+
 def test_via_shows_its_own_distance_over_a_neighbours_antipad(fakes):
     # Merged antipads: each via lies inside the other's clearance hole.
     east = (SIG[0] + 0.8, SIG[1])

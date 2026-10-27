@@ -169,6 +169,7 @@ class End:
     reference plane and its void in that plane's fill, as a window and a
     mask in it."""
 
+    net: str
     copper: Mapping[str, BaseGeometry]
     void: tuple[tuple[slice, slice], BoolMap]
     distance: float
@@ -194,7 +195,7 @@ def via_ends(
             continue
         void = fields.void(r.position, r.plane, distance)
         assert void is not None
-        out.append(End(copper, void, r.distance))
+        out.append(End(r.net, copper, void, r.distance))
     return out
 
 
@@ -227,7 +228,7 @@ def pad_ends(
                 continue
             void = fields.void(p.position, plane, distance)
             assert void is not None
-            out.append(End(copper, void, found))
+            out.append(End(p.net, copper, void, found))
     return out
 
 
@@ -248,16 +249,39 @@ def near_rings(marks: Mapping[render.MapKey, render.Markers], distance: float) -
     return shown
 
 
-def paint_ends(m: CoverageMap, grid: Grid, ends: Sequence[End]) -> None:
-    """Show each end's distance on `m`'s layer over its copper and over the
-    layer's copper in its void that the plane's field leaves unreachable;
-    copper the field reaches, such as a return's own, keeps its reading.
-    The end's copper goes on top, so a neighbour's void never covers it."""
+def net_copper(snapshot: Snapshot, net: str, layer: str) -> BaseGeometry:
+    """`net`'s tracks, pads, vias and fill on `layer`."""
+    shapes = [t.geometry for t in snapshot.tracks if t.net == net and t.layer == layer]
+    shapes += [
+        p.shapes[layer] for p in snapshot.pads if p.net == net and layer in p.shapes
+    ]
+    shapes += [
+        Point(v.position).buffer(v.diameter / 2) for v in snapshot.vias if v.net == net
+    ]
+    shapes.append(snapshot.fill(net, layer))
+    return unary_union(shapes)
+
+
+def paint_ends(m: CoverageMap, fields: ReturnFields, ends: Sequence[End]) -> None:
+    """Show each end's distance on `m`'s layer over its copper and over its
+    net's copper in its void that the plane's field leaves unreachable.
+    Other copper keeps its reading: a return's own copper the field reaches,
+    or another net's track over the void, which has no return there. Where
+    voids overlap, the worst end wins. The end's own copper goes on top, so
+    a neighbour's void never covers it."""
+    grid = fields.grid
     here = [e for e in ends if m.layer in e.copper]
+    lost = np.isinf(m.distance)
+    worst = np.full(grid.shape, -np.inf)
+    nets: dict[str, BoolMap] = {}
     for e in here:
+        if e.net not in nets:
+            nets[e.net] = grid.touching(net_copper(fields.snapshot, e.net, m.layer))
         win, void = e.void
-        unreachable = void & np.isinf(m.distance[win])
-        m.distance[win][unreachable] = e.distance
+        own = void & lost[win] & nets[e.net][win]
+        worst[win][own] = np.maximum(worst[win][own], e.distance)
+    painted = worst > -np.inf
+    m.distance[painted] = worst[painted]
     for e in here:
         copper = e.copper[m.layer]
         win = grid.bounds_window(copper.bounds)
@@ -375,7 +399,7 @@ def execute(
         *via_ends(results, fields, options.distance, shown),
     ]
     for m in maps:
-        paint_ends(m, fields.grid, ends)
+        paint_ends(m, fields, ends)
     if not maps:
         logger.info("No signal via changes layers: no heatmaps")
     elif not full_map:
