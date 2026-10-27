@@ -156,13 +156,22 @@ def geodesic(
         slice(max(0, min(rs) - k), min(grid.height, max(rs) + k + 1)),
         slice(max(0, min(cs) - k), min(grid.width, max(cs) + k + 1)),
     )
-    mcp = MCP_Geometric(np.where(mask[win], 1.0, np.inf), fully_connected=True)
-    cum, _ = mcp.find_costs([(r - win[0].start, c - win[1].start) for r, c in starts])
-    dist = np.asarray(cum) * grid.pixel
+    local = [(r - win[0].start, c - win[1].start) for r, c in starts]
+    out[win] = geodesic_in(mask[win], local, grid.pixel, limit)
+    return out
+
+
+def geodesic_in(
+    mask: BoolMap, starts: Sequence[Pixel], pixel: float, limit: float | None = None
+) -> FloatMap:
+    """Distance (mm) through `mask` from the nearest of `starts`, all inside
+    `mask`; inf elsewhere and, with a limit, beyond it."""
+    mcp = MCP_Geometric(np.where(mask, 1.0, np.inf), fully_connected=True)
+    cum, _ = mcp.find_costs(list(starts))
+    dist = np.asarray(cum) * pixel
     if limit is not None:
         dist[dist > limit] = np.inf
-    out[win] = dist
-    return out
+    return dist
 
 
 @dataclass(frozen=True)
