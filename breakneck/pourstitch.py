@@ -95,8 +95,9 @@ def via_sizes(snapshot: Snapshot, options: Options, net: str) -> tuple[ViaSize, 
 
 def _stitchable_nets(snapshot: Snapshot, nets: tuple[str, ...] | None) -> list[str]:
     if nets is None:
-        zoned = sorted({z.net for z in snapshot.copper_zones if z.net is not None})
-        stitchable, _ = snapshot.split_stitchable(zoned)
+        # Single-layer pours are expected here, not worth a warning each.
+        zoned = {z.net for z in snapshot.copper_zones if z.net is not None}
+        stitchable = sorted(n for n in zoned if snapshot.is_stitchable(n))
         logger.info(
             "pourstitch: nets with pours on two or more layers: "
             + (", ".join(stitchable) or "none")

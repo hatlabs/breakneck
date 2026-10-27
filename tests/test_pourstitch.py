@@ -1,3 +1,4 @@
+import dataclasses
 import math
 
 import numpy as np
@@ -422,3 +423,13 @@ def test_front_only_copper_beyond_reach_of_a_two_layer_spot_is_unstitchable():
     grey_mm2 = m.excluded.sum() * PIXEL_MM2
     expected = blob.area + (18 - 10 - D) * 1.0
     assert grey_mm2 == pytest.approx(expected, rel=0.05)
+
+
+def test_without_nets_single_layer_pours_are_skipped_without_a_warning(log):
+    sw = Zone("SW", ("F.Cu",), 0, box(0, 0, 5, 5), {"F.Cu": box(0, 0, 5, 5)})
+    snap = pour_snapshot(box(0, 0, 10, 10))
+    snap = dataclasses.replace(snap, zones=[*snap.zones, sw])
+
+    PourStitcher()(snap, Options(nets=None, distance=D), [])
+
+    assert not [m for m in log if "SW" in m and "skipping" in m]
