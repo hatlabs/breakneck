@@ -13,7 +13,13 @@ import kipy.board
 from loguru import logger
 
 from breakneck import drc
-from breakneck.commit import Marker, MarkerKind, commit_units, refill_tolerant
+from breakneck.commit import (
+    Marker,
+    MarkerKind,
+    commit_units,
+    marker_shapes,
+    refill_tolerant,
+)
 from breakneck.plan import Plan, Planner
 from breakneck.snapshot import Snapshot
 
@@ -149,7 +155,9 @@ def run_placement(
     if settings.dry_run:
         logger.info("Dry run: nothing committed")
         return RunResult(snapshot, result)
-    if not result.plan.units and not markers:
+    # Each run's markers replace the previous run's, like overlays do.
+    stale = marker_shapes(board.get_shapes())
+    if not result.plan.units and not markers and not stale:
         logger.info("Nothing to commit")
         return RunResult(snapshot, result)
 
@@ -163,7 +171,7 @@ def run_placement(
                 else " (a zone refill still running from the start can also do this)"
             )
         )
-    commit_units(kicad, board, settings.command, result.plan.units, markers)
+    commit_units(kicad, board, settings.command, result.plan.units, markers, stale)
     return RunResult(snapshot, result)
 
 

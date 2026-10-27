@@ -69,6 +69,8 @@ class RecordingBoard:
         self.client = FakeClient(self)
         # Successive get_as_string results; the last one repeats.
         self.texts = ["(kicad_pcb)"]
+        self.shapes = []
+        self.removed = []
 
     def __getattr__(self, attr):
         def record(*args, **kwargs):
@@ -81,6 +83,13 @@ class RecordingBoard:
 
     def get_as_string(self):
         return self.texts.pop(0) if len(self.texts) > 1 else self.texts[0]
+
+    def get_shapes(self):
+        return list(self.shapes)
+
+    def remove_items(self, items):
+        self.calls.append("remove_items")
+        self.removed.extend(items)
 
     def get_layer_by_name(self, name):
         return {"F.Cu": BL.BL_F_Cu, "B.Cu": BL.BL_B_Cu}[name]
@@ -272,6 +281,63 @@ def test_empty_plan_without_markers_commits_nothing(saved_board):
     assert "begin_commit" not in board.calls and pushes(board) == []
 
 
+def eco2_cross():
+    return commit.eco2_segment((7, 7), (8, 8))
+
+
+def test_run_replaces_earlier_markers_in_the_same_commit(saved_board):
+    board, kicad = saved_board
+    stale = eco2_cross()
+    other = commit.eco2_segment((0, 0), (1, 1))
+    other.layer = BL.BL_F_SilkS
+    board.shapes = [stale, other]
+    unfixable = (UnfixableSpot((3, 3), "GND", "no room"),)
+
+    placement.run_placement(
+        plan_at((1, 1), unfixable=unfixable), None, placement.RunSettings("t"), kicad
+    )
+
+    assert board.removed == [stale]
+    assert board.calls.count("begin_commit") == 1 and len(pushes(board)) == 1
+    begin, push = board.calls.index("begin_commit"), board.calls.index(pushes(board)[0])
+    assert begin < board.calls.index("remove_items") < push
+    placed, marks = board.created
+    assert len(placed) == 1 and all(m.layer == BL.BL_Eco2_User for m in marks)
+
+
+def test_run_with_nothing_to_place_still_removes_earlier_markers(saved_board):
+    board, kicad = saved_board
+    stale = eco2_cross()
+    board.shapes = [stale]
+
+    placement.run_placement(plan_at(), None, placement.RunSettings("t"), kicad)
+
+    assert board.removed == [stale] and board.created == []
+    assert board.calls.count("begin_commit") == 1 and len(pushes(board)) == 1
+
+
+def test_dry_run_keeps_earlier_markers(saved_board):
+    board, kicad = saved_board
+    board.shapes = [eco2_cross()]
+
+    placement.run_placement(
+        plan_at((1, 1)), None, placement.RunSettings("t", dry_run=True), kicad
+    )
+
+    assert board.removed == [] and "remove_items" not in board.calls
+    assert "begin_commit" not in board.calls
+
+
+def test_run_with_nothing_to_place_and_no_markers_commits_nothing(saved_board):
+    board, kicad = saved_board
+    board.shapes = [commit.eco2_segment((0, 0), (1, 1))]
+    board.shapes[0].layer = BL.BL_F_SilkS
+
+    placement.run_placement(plan_at(), None, placement.RunSettings("t"), kicad)
+
+    assert "begin_commit" not in board.calls and board.removed == []
+
+
 def test_board_edited_during_the_run_is_not_committed(saved_board):
     board, kicad = saved_board
     board.texts = ["(kicad_pcb)", "(kicad_pcb (edited))"]
@@ -282,6 +348,7 @@ def test_board_edited_during_the_run_is_not_committed(saved_board):
         )
 
     assert "begin_commit" not in board.calls and board.created == []
+    assert board.removed == []
 
 
 def test_board_changed_after_an_unconfirmed_refill_names_the_refill(

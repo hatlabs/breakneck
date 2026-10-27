@@ -16,6 +16,7 @@ import breakneck.overlay
 from breakneck.clearvias import stitching_vias
 from breakneck.commit import (
     commit_label,
+    marker_shapes,
     push_tolerant,
     refill_after_commit,
 )
@@ -428,7 +429,7 @@ def execute_clear(args):
     board = kicad.get_board()
 
     shapes = board.get_shapes()
-    eco2_shapes = [shape for shape in shapes if shape.layer == BL.BL_Eco2_User]
+    eco2_shapes = marker_shapes(shapes)
     outline = outline_from_edge_paths(read_edge_paths(shapes))
     images = (
         []
