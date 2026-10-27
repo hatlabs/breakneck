@@ -316,6 +316,20 @@ def test_run_with_nothing_to_place_still_removes_earlier_markers(saved_board):
     assert board.calls.count("begin_commit") == 1 and len(pushes(board)) == 1
 
 
+def test_planner_error_keeps_earlier_markers_and_commits_nothing(saved_board):
+    board, kicad = saved_board
+    board.shapes = [eco2_cross()]
+
+    with pytest.raises(ValueError, match="no nets"):
+        placement.run_placement(no_nets, None, placement.RunSettings("t"), kicad)
+
+    assert board.removed == [] and "begin_commit" not in board.calls
+
+
+def no_nets(snapshot, options, forbidden):
+    raise ValueError("no nets")
+
+
 def test_dry_run_keeps_earlier_markers(saved_board):
     board, kicad = saved_board
     board.shapes = [eco2_cross()]

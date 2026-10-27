@@ -515,6 +515,23 @@ def test_ground_vias_are_never_unserved(ground_nets):
     assert unserved(snap, ground_nets) == []
 
 
+def test_named_ground_net_without_copper_is_warned_about(log):
+    snap = snapshot(vias=[via("GND", 10, 10)])
+
+    assert resolve_ground_nets(snap, ["GND", "GDN"]) == ["GDN", "GND"]
+    (warning,) = [m for m in log if "has no zones, vias or pads" in m]
+    assert "GDN" in warning
+    assert "--ground-nets" in warning
+
+
+def test_named_ground_nets_with_copper_are_not_warned_about(log):
+    snap = snapshot(vias=[via("GND", 10, 10)])
+
+    resolve_ground_nets(snap, ["GND"])
+
+    assert not [m for m in log if "has no zones, vias or pads" in m]
+
+
 def test_no_ground_net_found_is_an_error():
     snap = two_layer_snapshot(
         vias=[via("SIG", 5, 5)], zones=[zone("PWR", TWO_LAYERS, GND_AREA)]
@@ -688,7 +705,7 @@ def through_via(zones=None, ground_nets=GROUNDS):
     snap = snapshot(
         vias=[via("SIG", *SIG_AT)], tracks=[front_track(), back_track()], zones=zones
     )
-    (r,) = via_references(snap, ground_nets)
+    (r,) = via_references(snap, resolve_ground_nets(snap, ground_nets))
     return r
 
 

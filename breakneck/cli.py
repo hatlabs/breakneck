@@ -28,7 +28,12 @@ from breakneck.placement import (
     SplitError,
     run_placement,
 )
-from breakneck.plan import POURSTITCH_DISTANCE, POURSTITCH_FALLBACK_VIA
+from breakneck.plan import (
+    POURSTITCH_FALLBACK_VIA,
+    POURSTITCH_GROUND_DISTANCE,
+    POURSTITCH_POWER_DISTANCE,
+    StitchClass,
+)
 from breakneck.returnvia import DEFAULT_DISTANCE, NoGroundNetsError, ReturnViaOptions
 from breakneck.snapshot import (
     Snapshot,
@@ -203,19 +208,29 @@ def add_pourstitch_parser(subparsers) -> None:
     p = subparsers.add_parser(
         "pourstitch",
         help="Stitch pours so every point is within a distance of a via",
+        description="Stitch the ground nets' pours, or with --power every other "
+        "net's pours, so every point is within a distance of a via.",
+    )
+    p.add_argument(
+        "--power",
+        action="store_true",
+        help="Stitch the nets that are not ground instead of the ground nets",
     )
     p.add_argument(
         "--nets",
         nargs="+",
         metavar="NET",
-        help="Nets to stitch (default: every net with pours on two or more layers)",
+        help="Nets to stitch, within the run's class (default: every net of the "
+        "class with pours on two or more layers)",
     )
+    _add_ground_nets_argument(p)
     p.add_argument(
         "--distance",
         "-d",
         type=float,
-        default=POURSTITCH_DISTANCE,
-        help="Maximum distance to a stitch, through the copper, in mm",
+        help="Maximum distance to a stitch, through the copper, in mm "
+        f"(default: {POURSTITCH_GROUND_DISTANCE:g} for ground, "
+        f"{POURSTITCH_POWER_DISTANCE:g} with --power)",
     )
     p.add_argument(
         "--via",
@@ -519,6 +534,8 @@ def execute_pourstitch(args):
 
     options = pourstitch.Options(
         nets=None if args.nets is None else tuple(args.nets),
+        stitch_class=StitchClass.POWER if args.power else StitchClass.GROUND,
+        ground_nets=tuple(args.ground_nets) if args.ground_nets else None,
         distance=args.distance,
         via=args.via,
         fallback_via=args.fallback_via,
@@ -528,7 +545,12 @@ def execute_pourstitch(args):
         overlay=args.overlay,
         overlay_layers=tuple(args.overlay_layers),
     )
-    with _exit_on(breakneck.overlay.OverlayLayersError, *PLACEMENT_ERRORS):
+    with _exit_on(
+        NoGroundNetsError,
+        pourstitch.OtherClassNetsError,
+        breakneck.overlay.OverlayLayersError,
+        *PLACEMENT_ERRORS,
+    ):
         pourstitch_command.execute(
             options,
             outputs,

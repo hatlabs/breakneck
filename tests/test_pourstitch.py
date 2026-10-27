@@ -10,15 +10,20 @@ from breakneck.plan import (
     EDGE_GAP,
     FORBIDDEN_RADIUS,
     OTHER_NET_CLEARANCE,
+    POURSTITCH_GROUND_DISTANCE,
+    POURSTITCH_POWER_DISTANCE,
     PlannedUnit,
+    StitchClass,
 )
 from breakneck.pourstitch import (
     QUANTISATION,
     Options,
+    OtherClassNetsError,
     PourStitcher,
     lattice_sites,
     summarise,
 )
+from breakneck.returnvia import NoGroundNetsError
 from breakneck.snapshot import Pad, PadKind, Snapshot, Via, ViaSize, Zone
 
 TWO_LAYERS = ("F.Cu", "B.Cu")
@@ -275,7 +280,7 @@ def _two_net_snapshot():
     )
 
 
-def test_without_nets_every_net_with_pours_on_two_layers_is_stitched(log):
+def test_without_nets_every_ground_net_with_pours_on_two_layers_is_stitched(log):
     snap = _two_net_snapshot()
 
     plan = PourStitcher()(snap, Options(nets=None, distance=D), [])
@@ -283,27 +288,22 @@ def test_without_nets_every_net_with_pours_on_two_layers_is_stitched(log):
     assert plan.units
     assert {u.net for u in plan.units} == {NET}
     assert any(
-        "pourstitch: nets with pours on two or more layers: GND" in m for m in log
+        "pourstitch: ground nets with pours on two or more layers, "
+        f"stitched at {D:g} mm: GND" in m
+        for m in log
     )
 
 
-def test_nets_restrict_the_stitched_nets():
-    zones = [
-        Zone(n, TWO_LAYERS, 0, b, {L: b for L in TWO_LAYERS})
-        for n, b in ((NET, box(0, 0, 10, 10)), ("+3.3V", box(20, 0, 30, 10)))
-    ]
-    snap = Snapshot(
-        copper_layers=TWO_LAYERS,
-        zones=zones,
-        edge_paths=outline_paths(box(0, 0, 30, 10)),
-        via_sizes={NET: VIA, "+3.3V": VIA},
+def test_nets_restrict_the_stitched_nets_within_the_class():
+    snap = pours_snapshot(
+        {NET: box(0, 0, 10, 10), "+3.3V": box(20, 0, 30, 10), "+5V": box(40, 0, 50, 10)}
     )
 
-    everything = PourStitcher()(snap, Options(nets=None, distance=D), [])
-    restricted = PourStitcher()(snap, options(), [])
+    everything = PourStitcher()(snap, power(), [])
+    restricted = PourStitcher()(snap, power(nets=("+3.3V",)), [])
 
-    assert {u.net for u in everything.units} == {NET, "+3.3V"}
-    assert {u.net for u in restricted.units} == {NET}
+    assert {u.net for u in everything.units} == {"+3.3V", "+5V"}
+    assert {u.net for u in restricted.units} == {"+3.3V"}
 
 
 def test_via_override_is_used_for_lattice():
@@ -443,3 +443,192 @@ def test_named_single_layer_net_is_skipped_with_a_warning(log):
     PourStitcher()(snap, Options(nets=("SW",), distance=D), [])
 
     assert [m for m in log if "SW" in m and "skipping" in m]
+
+
+# ---- ground and power classes --------------------------------------------------
+
+POWER_NET = "+3.3V"
+
+
+def pours_snapshot(pours, vias=(), board=None):
+    """A two-layer pour per net; `pours` maps net to its outline."""
+    zones = [
+        Zone(n, TWO_LAYERS, 0, b, {L: b for L in TWO_LAYERS}) for n, b in pours.items()
+    ]
+    board = board or unary_union(list(pours.values())).envelope
+    return Snapshot(
+        copper_layers=TWO_LAYERS,
+        zones=zones,
+        vias=list(vias),
+        edge_paths=outline_paths(board),
+        via_sizes=dict.fromkeys(pours, VIA),
+    )
+
+
+def ground_and_power_snapshot():
+    """GND and +3.3V, each poured on both layers, 30 mm square apiece."""
+    return pours_snapshot({NET: box(0, 0, 30, 30), POWER_NET: box(40, 0, 70, 30)})
+
+
+def ground(**kw):
+    return Options(**kw)
+
+
+def power(**kw):
+    return Options(stitch_class=StitchClass.POWER, **kw)
+
+
+@pytest.mark.parametrize(
+    ("stitch_class", "default"),
+    [
+        (StitchClass.GROUND, POURSTITCH_GROUND_DISTANCE),
+        (StitchClass.POWER, POURSTITCH_POWER_DISTANCE),
+    ],
+)
+def test_distance_defaults_to_the_class_distance(stitch_class, default):
+    assert Options(stitch_class=stitch_class).max_distance == default
+    assert Options(stitch_class=stitch_class, distance=4).max_distance == 4
+
+
+def interior_sites_planned(snap, plan, net, pour, pitch):
+    """Whether every lattice site well inside `pour` got a via of `net`."""
+    sites = lattice_sites(snap.board_outline.bounds, pitch, 0)
+    interior = [s for s in sites if pour.buffer(-pitch / 2).contains(Point(s))]
+    vias = [u.position for u in plan.units if u.net == net]
+    return interior and all(min(math.dist(v, s) for v in vias) <= 0.1 for s in interior)
+
+
+def test_plain_run_stitches_only_the_ground_net_on_its_lattice(log):
+    snap = ground_and_power_snapshot()
+    opts = ground()
+
+    plan = PourStitcher()(snap, opts, [])
+
+    assert {u.net for u in plan.units} == {NET}
+    assert opts.pitch == pytest.approx(3 * math.sqrt(2))
+    assert interior_sites_planned(snap, plan, NET, box(0, 0, 30, 30), opts.pitch)
+    assert any(
+        "pourstitch: ground nets with pours on two or more layers, "
+        "stitched at 3 mm: GND" in m
+        for m in log
+    )
+    assert not [m for m in log if "skipping" in m]
+
+
+def test_power_run_stitches_only_the_power_net_on_its_lattice(log):
+    snap = ground_and_power_snapshot()
+    opts = power()
+    stitcher = PourStitcher()
+
+    plan = stitcher(snap, opts, [])
+
+    assert {u.net for u in plan.units} == {POWER_NET}
+    assert opts.pitch == pytest.approx(10 * math.sqrt(2))
+    assert interior_sites_planned(snap, plan, POWER_NET, box(40, 0, 70, 30), opts.pitch)
+    worst = max_uncovered(stitcher, snap, opts, plan.units)
+    assert POURSTITCH_GROUND_DISTANCE < worst <= POURSTITCH_POWER_DISTANCE
+    assert any(
+        "pourstitch: power nets with pours on two or more layers, "
+        "stitched at 10 mm: +3.3V" in m
+        for m in log
+    )
+    assert not [m for m in log if "skipping" in m]
+
+
+def finger_power_snapshot():
+    """A +3.3V pad area stitched at its centre, with a finger whose tip is
+    8 mm through the copper from that stitch, beside a GND pour."""
+    body = box(0, 0, 4, 4)
+    finger = box(4, 1.5, 10.3, 2.5)
+    stitch = Via("v", POWER_NET, (2.0, 2.0), VIA.diameter, VIA.drill)
+    return pours_snapshot(
+        {POWER_NET: unary_union([body, finger]), NET: box(0, 6, 10.3, 10)},
+        vias=[stitch],
+        board=box(-1, -1, 11.3, 11),
+    )
+
+
+def test_power_finger_within_power_distance_gets_no_via():
+    plan = PourStitcher()(finger_power_snapshot(), power(), [])
+
+    assert plan.units == ()
+    assert not plan.unfixable
+
+
+def test_power_finger_gets_a_via_with_a_shorter_distance():
+    plan = PourStitcher()(
+        finger_power_snapshot(), power(distance=POURSTITCH_GROUND_DISTANCE), []
+    )
+
+    assert [u for u in plan.units if u.net == POWER_NET and u.position[0] > 4]
+
+
+@pytest.mark.parametrize(
+    ("opts", "skipped", "hint"),
+    [
+        (ground(nets=(NET, POWER_NET)), POWER_NET, "stitch it with --power"),
+        (power(nets=(NET, POWER_NET)), NET, "stitch it without --power"),
+    ],
+)
+def test_listed_net_of_the_other_class_is_skipped_with_a_warning(
+    log, opts, skipped, hint
+):
+    plan = PourStitcher()(ground_and_power_snapshot(), opts, [])
+
+    assert plan.units
+    assert skipped not in {u.net for u in plan.units}
+    (warning,) = [m for m in log if f"Net {skipped} " in m and "skipping" in m]
+    assert hint in warning
+
+
+@pytest.mark.parametrize(
+    ("opts", "hint"),
+    [
+        (ground(nets=(POWER_NET,)), r"\+3\.3V.*run with --power"),
+        (power(nets=(NET,)), "GND.*run without --power"),
+    ],
+)
+def test_listed_nets_all_of_the_other_class_are_an_error(opts, hint):
+    with pytest.raises(OtherClassNetsError, match=hint):
+        PourStitcher()(ground_and_power_snapshot(), opts, [])
+
+
+def test_ground_nets_override_detection():
+    snap = ground_and_power_snapshot()
+    grounds = (POWER_NET,)
+
+    as_ground = PourStitcher()(snap, ground(ground_nets=grounds), [])
+    as_power = PourStitcher()(snap, power(ground_nets=grounds), [])
+
+    assert {u.net for u in as_ground.units} == {POWER_NET}
+    assert {u.net for u in as_power.units} == {NET}
+
+
+@pytest.mark.parametrize(("grounds", "warned"), [(("GDN",), True), ((NET,), False)])
+def test_misspelled_ground_net_is_warned_about(log, grounds, warned):
+    PourStitcher()(ground_and_power_snapshot(), ground(ground_nets=grounds), [])
+
+    assert bool([m for m in log if "has no zones, vias or pads" in m]) is warned
+
+
+def no_ground_snapshot():
+    return pours_snapshot({POWER_NET: box(0, 0, 20, 20), "VBAT": box(30, 0, 50, 20)})
+
+
+def test_plain_run_without_a_ground_net_fails():
+    with pytest.raises(NoGroundNetsError):
+        PourStitcher()(no_ground_snapshot(), ground(), [])
+
+
+def test_power_run_without_a_ground_net_stitches_every_stitchable_net(log):
+    plan = PourStitcher()(no_ground_snapshot(), power(), [])
+
+    assert {u.net for u in plan.units} == {POWER_NET, "VBAT"}
+    assert any("No ground net found" in m and "every" in m for m in log)
+
+
+def test_power_run_on_a_ground_only_board_stitches_nothing(log):
+    plan = PourStitcher()(pour_snapshot(box(0, 0, 10, 10)), power(), [])
+
+    assert plan.units == ()
+    assert any("power nets" in m and m.rstrip().endswith(": none") for m in log)

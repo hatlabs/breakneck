@@ -6,6 +6,9 @@ stitch is a same-net via or plated pad that sits in the net's fill on every
 layer where one of the net's zone outlines contains it (the zone-layer rule,
 `Snapshot.required_layers`).
 
+A run stitches one class of nets: the ground nets, found the way
+`returnvia` finds them, or every other stitchable net.
+
 Placement runs a square lattice of pitch D·√2 first, then fills the gaps
 greedily, farthest uncovered pixel first.
 """
@@ -28,13 +31,13 @@ from breakneck.plan import (
     FORBIDDEN_RADIUS,
     HOLE_TO_HOLE_GAP,
     OTHER_NET_CLEARANCE,
-    POURSTITCH_DISTANCE,
     POURSTITCH_FALLBACK_VIA,
     QUANTISATION,
     SAME_NET_PAD_GAP,
     THERMAL_REACH,
     Plan,
     PlannedUnit,
+    StitchClass,
     UnfixableSpot,
     pad_clearance,
 )
@@ -49,6 +52,7 @@ from breakneck.raster import (
     touch,
     uncovered,
 )
+from breakneck.returnvia import NoGroundNetsError, resolve_ground_nets
 from breakneck.snapshot import MIN_STITCH_LAYERS, PadKind, Point2, Snapshot, ViaSize
 
 VIA_SPACING = 0.9
@@ -62,14 +66,25 @@ UNREACHABLE = 1e6
 @dataclass(frozen=True)
 class Options:
     nets: tuple[str, ...] | None = None
-    distance: float = POURSTITCH_DISTANCE
+    stitch_class: StitchClass = StitchClass.GROUND
+    # None: detect them the way returnvia does.
+    ground_nets: tuple[str, ...] | None = None
+    # None: the stitch class's default; read `max_distance`.
+    distance: float | None = None
     via: ViaSize | None = None
     fallback_via: ViaSize = POURSTITCH_FALLBACK_VIA
 
     @property
+    def max_distance(self) -> float:
+        """Farthest any pour pixel may be from a stitch, through the copper."""
+        if self.distance is None:
+            return self.stitch_class.default_distance
+        return self.distance
+
+    @property
     def pitch(self) -> float:
-        """Square lattice pitch whose cell centre is `distance` from a site."""
-        return self.distance * math.sqrt(2)
+        """Square lattice pitch whose cell centre is `max_distance` from a site."""
+        return self.max_distance * math.sqrt(2)
 
 
 def lattice_sites(
@@ -97,17 +112,54 @@ def _stitchable_nets(snapshot: Snapshot, nets: tuple[str, ...] | None) -> list[s
     if nets is None:
         # Single-layer pours are expected here, not worth a warning each.
         zoned = {z.net for z in snapshot.copper_zones if z.net is not None}
-        stitchable = sorted(n for n in zoned if snapshot.is_stitchable(n))
-        logger.info(
-            "pourstitch: nets with pours on two or more layers: "
-            + (", ".join(stitchable) or "none")
-        )
-        return stitchable
+        return sorted(n for n in zoned if snapshot.is_stitchable(n))
     present = [n for n in nets if snapshot.zone_layers(n)]
     for n in sorted(set(nets) - set(present)):
         logger.warning(f"Net {n} has no copper zones; skipping")
     stitchable, _ = snapshot.split_stitchable(present)
     return stitchable
+
+
+def _ground_nets(snapshot: Snapshot, options: Options) -> set[str]:
+    try:
+        return set(resolve_ground_nets(snapshot, options.ground_nets))
+    except NoGroundNetsError:
+        if options.stitch_class is StitchClass.GROUND:
+            raise
+        logger.info("No ground net found; every stitchable net counts as power")
+        return set()
+
+
+class OtherClassNetsError(ValueError):
+    pass
+
+
+def _class_nets(snapshot: Snapshot, options: Options) -> list[str]:
+    """The stitchable nets of the run's class, logged with its distance."""
+    wanted = options.stitch_class
+    other, flag = (
+        ("power", "with --power")
+        if wanted is StitchClass.GROUND
+        else ("ground", "without --power")
+    )
+    grounds = _ground_nets(snapshot, options)
+    nets, skipped = [], []
+    for n in _stitchable_nets(snapshot, options.nets):
+        if (n in grounds) == (wanted is StitchClass.GROUND):
+            nets.append(n)
+        elif options.nets is not None:
+            skipped.append(n)
+    if skipped and not nets:
+        raise OtherClassNetsError(
+            f"--nets lists only {other} nets ({', '.join(skipped)}); run {flag}"
+        )
+    for n in skipped:
+        logger.warning(f"Net {n} is a {other} net; skipping (stitch it {flag})")
+    logger.info(
+        f"pourstitch: {wanted.value} nets with pours on two or more layers, "
+        f"stitched at {options.max_distance:g} mm: " + (", ".join(nets) or "none")
+    )
+    return nets
 
 
 class _Context:
@@ -119,7 +171,7 @@ class _Context:
         self.snapshot = snapshot
         self.options = options
         self.grid = g = Grid.covering(snapshot.board_outline.bounds)
-        self.nets = _stitchable_nets(snapshot, options.nets)
+        self.nets = _class_nets(snapshot, options)
 
         self.layers: dict[str, list[str]] = {}
         self.fill: dict[tuple[str, str], BoolMap] = {}
@@ -160,7 +212,7 @@ class _Context:
         a two-layer pour by a long neck is out of reach beyond the neck's
         first D, though it is one island with the pour.
         """
-        d = self.options.distance
+        d = self.options.max_distance
         out = {}
         for net in self.nets:
             joinable = self.joinable[net]
@@ -340,7 +392,7 @@ class _NetRun:
     def add(self, px: Pixel, size: ViaSize) -> None:
         ctx = self.ctx
         unit = PlannedUnit(ctx.grid.point(px), self.net, size)
-        limit = UPDATE_REACH_FACTOR * ctx.options.distance
+        limit = UPDATE_REACH_FACTOR * ctx.options.max_distance
         for L, touched in ctx.unit_touch(unit).items():
             self.dist[L] = np.minimum(
                 self.dist[L], ctx.geodesic(self.net, L, touched, limit)
@@ -380,7 +432,7 @@ class _NetRun:
         return placed
 
     def _worst(self, unfixable: dict[str, BoolMap]) -> tuple[str, Pixel] | None:
-        d = self.ctx.options.distance
+        d = self.ctx.options.max_distance
         worst: tuple[float, str, Pixel] | None = None
         for L, dist in self.dist.items():
             bad = self.ctx.fill[(self.net, L)] & ~unfixable[L] & (dist > d)
@@ -394,7 +446,7 @@ class _NetRun:
         return None if worst is None else (worst[1], worst[2])
 
     def greedy(self) -> int:
-        ctx, d = self.ctx, self.ctx.options.distance
+        ctx, d = self.ctx, self.ctx.options.max_distance
         # No via can reach unstitchable copper; searching it would only add
         # spurious unfixable spots.
         unfixable = {L: ctx.unstitchable[(self.net, L)].copy() for L in self.dist}
@@ -434,7 +486,7 @@ class _NetRun:
 
     def uncovered_mm2(self) -> float:
         ctx = self.ctx
-        d, px = ctx.options.distance, ctx.grid.pixel
+        d, px = ctx.options.max_distance, ctx.grid.pixel
         return sum(
             float(
                 np.sum(
@@ -484,7 +536,7 @@ class PourStitcher:
             n_greedy = run.greedy()
             logger.info(
                 f"pourstitch {net}: {n_lattice} lattice + {n_greedy} gap vias, "
-                f"{run.uncovered_mm2():.2f} mm² beyond {options.distance:g} mm"
+                f"{run.uncovered_mm2():.2f} mm² beyond {options.max_distance:g} mm"
             )
         return Plan(units=tuple(out.units), unfixable=tuple(out.unfixable))
 

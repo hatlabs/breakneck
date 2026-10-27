@@ -44,7 +44,13 @@ def resolve_ground_nets(
     single-plane stackups never have; their ground is the net named GND.
     """
     if ground_nets:
-        return sorted(ground_nets)
+        named = sorted(ground_nets)
+        for n in named:
+            if not _has_copper(snapshot, n):
+                logger.warning(
+                    f"Ground net {n} has no zones, vias or pads on the board; check --ground-nets"
+                )
+        return named
     grounds = snapshot.default_ground_nets()
     if grounds:
         return grounds
@@ -102,11 +108,8 @@ class ViaReferences:
         return tuple(dict.fromkeys(c.plane for c in self.layers if c.plane))
 
 
-def via_references(
-    snapshot: Snapshot, ground_nets: Iterable[str] | None
-) -> list[ViaReferences]:
+def via_references(snapshot: Snapshot, grounds: Sequence[str]) -> list[ViaReferences]:
     """Connected layers and their reference planes for every non-ground via."""
-    grounds = resolve_ground_nets(snapshot, ground_nets)
     return [
         ViaReferences(
             v,

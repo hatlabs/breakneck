@@ -107,6 +107,7 @@ class _Context:
 
     snapshot: Snapshot
     options: ReturnViaOptions
+    grounds: tuple[str, ...]
     fields: ReturnFields
     targets: tuple[Target, ...]
     unfixable: tuple[UnfixableSpot, ...]
@@ -130,7 +131,14 @@ class _Context:
                     assert r.reason is not None
                     unfixable.append(UnfixableSpot(r.position, r.net, r.reason))
             targets += [Target(refs.via, g, tuple(p)) for g, p in by_ground.items()]
-        return cls(snapshot, options, fields, tuple(targets), tuple(unfixable))
+        return cls(
+            snapshot,
+            options,
+            tuple(grounds),
+            fields,
+            tuple(targets),
+            tuple(unfixable),
+        )
 
 
 class _Round:
@@ -265,7 +273,20 @@ class ReturnViaPlanner:
         options: ReturnViaOptions,
         forbidden: Sequence[Point2],
     ) -> Plan:
-        ctx = self._ctx
-        if ctx is None or ctx.snapshot is not snapshot or ctx.options != options:
+        ctx = self._cached(snapshot, options)
+        if ctx is None:
             ctx = self._ctx = _Context.measure(snapshot, options)
         return _Round(ctx, forbidden).plan()
+
+    def grounds(self, snapshot: Snapshot, options: ReturnViaOptions) -> list[str]:
+        """The ground nets, resolved again only if this snapshot was never planned."""
+        ctx = self._cached(snapshot, options)
+        if ctx is None:
+            return resolve_ground_nets(snapshot, options.ground_nets)
+        return list(ctx.grounds)
+
+    def _cached(self, snapshot: Snapshot, options: ReturnViaOptions) -> _Context | None:
+        ctx = self._ctx
+        if ctx is None or ctx.snapshot is not snapshot or ctx.options != options:
+            return None
+        return ctx

@@ -8,6 +8,7 @@ DRC prune loop feeds back the positions of units it dropped.
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from enum import Enum
 from typing import TypeVar
 
 from breakneck.snapshot import Point2, Snapshot, ViaSize
@@ -32,7 +33,25 @@ def pad_clearance(override: float | None) -> float:
 
 
 # pourstitch defaults live here so the CLI can show them without the place extra.
-POURSTITCH_DISTANCE = 2.5
+# A 3 mm ground lattice (4.2 mm pitch) is λ/20 at about 1.7 GHz in FR-4.
+POURSTITCH_GROUND_DISTANCE = 3.0
+# Power pours need vias for connectivity, current and extremities only.
+POURSTITCH_POWER_DISTANCE = 10.0
+
+
+class StitchClass(Enum):
+    """The nets one pourstitch run stitches: ground, or every other net."""
+
+    GROUND = "ground"
+    POWER = "power"
+
+    @property
+    def default_distance(self) -> float:
+        if self is StitchClass.POWER:
+            return POURSTITCH_POWER_DISTANCE
+        return POURSTITCH_GROUND_DISTANCE
+
+
 POURSTITCH_FALLBACK_VIA = ViaSize(0.5, 0.3)
 POURSTITCH_PIXEL = 0.1
 # Every raster clearance gets one pixel of margin for the rasterisation error.

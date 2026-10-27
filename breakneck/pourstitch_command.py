@@ -18,6 +18,7 @@ from breakneck.snapshot import Snapshot
 COMMAND = "pourstitch"
 OVERLAY_COMMIT = "breakneck pourstitch overlay"
 OVER_COLOUR = "#ff2a6d"
+EMPTY_TITLE = "Pour stitching: no {nets} nets to stitch"
 STYLE = render.HeatmapStyle(
     title=(
         "Pour stitching: filled = planned via, ring = existing via, "
@@ -41,7 +42,7 @@ def _log_coverage(
     grid: Grid,
 ) -> None:
     counts = stitcher.stitch_counts(snapshot, options)
-    for c in summarise(maps, options.distance, grid.pixel):
+    for c in summarise(maps, options.max_distance, grid.pixel):
         unstitchable = (
             f"; {c.unstitchable_mm2:.2f} mm² can't be stitched (no two-layer spot within reach)"
             if c.unstitchable_mm2
@@ -49,7 +50,7 @@ def _log_coverage(
         )
         logger.info(
             f"  {c.net} on {c.layer}: {c.uncovered_mm2:.2f} mm² ({c.uncovered_pixels} px) "
-            f"beyond {options.distance:g} mm; {counts[c.net]} existing stitches"
+            f"beyond {options.max_distance:g} mm; {counts[c.net]} existing stitches"
             + unstitchable
         )
 
@@ -88,8 +89,9 @@ def execute(
     """Run pourstitch against the open board.
 
     `check` only measures the existing stitching: no planning, no kicad-cli,
-    no vias or markers. Overlays are placed in their own commit, also in a
-    dry run.
+    no vias. With overlays, it removes the markers in the overlay commit,
+    since the heatmap shows what they marked. Overlays are placed in their
+    own commit, also in a dry run.
     """
     kicad = kicad or kipy.KiCad()
     board = kicad.get_board()
@@ -119,15 +121,24 @@ def execute(
     _log_coverage(stitcher, snapshot, options, maps, grid)
 
     if outputs.render is not None:
-        render.render_panels(
-            outputs.render,
-            snapshot,
-            grid,
-            maps,
-            markers(snapshot, plan, maps),
-            options.distance,
-            STYLE,
-        )
+        if maps:
+            render.render_panels(
+                outputs.render,
+                snapshot,
+                grid,
+                maps,
+                markers(snapshot, plan, maps),
+                options.max_distance,
+                STYLE,
+            )
+        else:
+            # Replaces the previous run's heatmap, which would no longer apply.
+            render.render_outline(
+                outputs.render,
+                snapshot,
+                grid,
+                EMPTY_TITLE.format(nets=options.stitch_class.value),
+            )
         logger.info(f"Wrote {outputs.render}")
 
     if outputs.overlay:
@@ -136,7 +147,7 @@ def execute(
             board,
             (
                 lambda out_dir: render.write_overlays(
-                    out_dir, grid, maps, {}, options.distance, STYLE
+                    out_dir, grid, maps, {}, options.max_distance, STYLE
                 )
             )
             if maps
@@ -145,4 +156,5 @@ def execute(
             outputs,
             place_overlay,
             OVERLAY_COMMIT,
+            () if check else None,
         )

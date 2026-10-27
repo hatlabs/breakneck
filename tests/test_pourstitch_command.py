@@ -7,9 +7,10 @@ from kipy.geometry import Vector2
 from kipy.proto.board.board_types_pb2 import BoardLayer as BL
 from shapely.geometry import box
 
-from breakneck import cli, drc, overlay, pourstitch_command
-from breakneck.commit import eco2_segment
+from breakneck import cli, drc, overlay, pourstitch_command, render
+from breakneck.commit import MARKER_LAYER, eco2_segment
 from breakneck.placement import RunResult, RunSettings
+from breakneck.plan import POURSTITCH_POWER_DISTANCE, StitchClass
 from breakneck.pourstitch import Options
 from breakneck.snapshot import NM_PER_MM, Snapshot, ViaSize, Zone
 
@@ -29,9 +30,11 @@ def snapshot() -> Snapshot:
 
 
 class Board:
-    def __init__(self, enabled=(BL.BL_User_1, BL.BL_User_2)):
+    def __init__(self, enabled=(BL.BL_User_1, BL.BL_User_2), shapes=()):
         self.calls: list = []
         self.enabled = [BL.BL_F_Cu, BL.BL_B_Cu, *enabled]
+        self.shapes = list(shapes)
+        self.removed: list = []
 
     def get_copper_layer_count(self):
         return 2
@@ -42,6 +45,9 @@ class Board:
     def get_reference_images(self):
         return []
 
+    def get_shapes(self):
+        return self.shapes
+
     def refill_zones(self, block=True, max_poll_seconds=0):
         self.calls.append("refill_zones")
 
@@ -51,6 +57,7 @@ class Board:
 
     def remove_items(self, items):
         self.calls.append("remove_items")
+        self.removed += items
 
     def push_commit(self, c, message=""):
         self.calls.append(("push_commit", message))
@@ -133,6 +140,59 @@ def test_check_with_overlay_creates_only_the_image_commit(
     # The placed images carry the PNG data; no file is left behind.
     assert all(i.image_data for i in created)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_check_with_overlay_removes_the_markers_in_the_image_commit(fakes):
+    created, _ = fakes
+    stale = eco2_segment((1.0, 1.0), (2.0, 2.0))
+    board = Board(shapes=[stale])
+    outputs = overlay.Outputs(overlay=True)
+
+    pourstitch_command.execute(OPTIONS, outputs, check=True, kicad=KiCad(board))  # type: ignore[arg-type]
+
+    assert board.calls == [
+        "refill_zones",
+        "begin_commit",
+        "remove_items",
+        ("push_commit", pourstitch_command.OVERLAY_COMMIT),
+    ]
+    assert board.removed == [stale]
+    assert len(created) == len(LAYERS)
+    assert all(i.layer != MARKER_LAYER for i in created)
+
+
+def test_check_without_overlay_leaves_the_markers(fakes, tmp_path: Path):
+    board = Board(shapes=[eco2_segment((1.0, 1.0), (2.0, 2.0))])
+    outputs = overlay.Outputs(render=tmp_path / "heat.png")
+
+    pourstitch_command.execute(OPTIONS, outputs, check=True, kicad=KiCad(board))  # type: ignore[arg-type]
+
+    assert board.calls == ["refill_zones"]
+
+
+def test_check_with_overlay_not_placed_leaves_the_markers(fakes, png_dir):
+    board = Board(enabled=(), shapes=[eco2_segment((1.0, 1.0), (2.0, 2.0))])
+    outputs = overlay.Outputs(overlay=True)
+
+    pourstitch_command.execute(
+        OPTIONS,
+        outputs,
+        check=True,
+        dry_run=True,
+        kicad=KiCad(board),  # type: ignore[arg-type]
+    )
+
+    assert board.calls == ["refill_zones"]
+
+
+def test_placing_run_overlay_leaves_the_markers_to_the_placement(fakes):
+    stale = eco2_segment((1.0, 1.0), (2.0, 2.0))
+    board = Board(shapes=[stale])
+    outputs = overlay.Outputs(overlay=True)
+
+    pourstitch_command.execute(OPTIONS, outputs, dry_run=True, kicad=KiCad(board))  # type: ignore[arg-type]
+
+    assert board.removed == []
 
 
 def test_dry_run_still_places_overlay(fakes, tmp_path: Path):
@@ -385,3 +445,63 @@ def test_unplaceable_run_without_maps_leaves_no_temporary_directory(fakes, png_d
     )
 
     assert not png_dir.exists()
+
+
+def test_power_check_measures_and_renders_at_the_power_distance(
+    fakes, log, monkeypatch, tmp_path: Path
+):
+    power_pour = box(20, 0, 30, 10)
+    snap = Snapshot(
+        copper_layers=LAYERS,
+        zones=[
+            Zone(n, LAYERS, 0, b, {L: b for L in LAYERS})
+            for n, b in (("GND", POUR), ("+3.3V", power_pour))
+        ],
+        edge_paths=[[(x, y) for x, y in box(0, 0, 30, 10).exterior.coords]],
+    )
+    monkeypatch.setattr(Snapshot, "from_board", staticmethod(lambda board: snap))
+    rendered = []
+    monkeypatch.setattr(
+        render,
+        "render_panels",
+        lambda path, snapshot, grid, maps, markers, distance, style: rendered.append(
+            (maps, distance)
+        ),
+    )
+    options = Options(stitch_class=StitchClass.POWER)
+
+    pourstitch_command.execute(
+        options,
+        overlay.Outputs(render=tmp_path / "heat.png"),
+        check=True,
+        kicad=KiCad(Board()),  # type: ignore[arg-type]
+    )
+
+    reports = [line for line in log if " on " in line and "existing stitches" in line]
+    assert reports and all(line.strip().startswith("+3.3V on") for line in reports)
+    assert all(f"beyond {POURSTITCH_POWER_DISTANCE:g} mm" in line for line in reports)
+    ((maps, distance),) = rendered
+    assert {m.net for m in maps} == {"+3.3V"}
+    assert distance == POURSTITCH_POWER_DISTANCE
+
+
+def test_render_without_maps_replaces_the_previous_heatmap(
+    fakes, monkeypatch, tmp_path: Path
+):
+    snap = Snapshot(
+        copper_layers=LAYERS,
+        zones=[Zone("GND", LAYERS, 0, POUR, {L: POUR for L in LAYERS})],
+        edge_paths=[[(x, y) for x, y in box(0, 0, 30, 10).exterior.coords]],
+    )
+    monkeypatch.setattr(Snapshot, "from_board", staticmethod(lambda board: snap))
+    path = tmp_path / "heat.png"
+    path.write_bytes(b"stale")
+
+    pourstitch_command.execute(
+        Options(stitch_class=StitchClass.POWER),
+        overlay.Outputs(render=path),
+        check=True,
+        kicad=KiCad(Board()),  # type: ignore[arg-type]
+    )
+
+    assert path.read_bytes().startswith(b"\x89PNG")
