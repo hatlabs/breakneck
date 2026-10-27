@@ -1,5 +1,8 @@
 """Plan a via plus stub for every unserved SMD pad of the stitched nets.
 
+A pad is a candidate when a zone of its own net covers the pad's position
+on another copper layer; explicit nets narrow that selection.
+
 A pad is served when a same-net via lies within `SERVED_DISTANCE` of it and
 is reached through the pad's same-net tracks, pads or pour on the pad's layer.
 For an unserved pad the planner scans `DIRECTIONS` rays from the pad centre,
@@ -38,7 +41,7 @@ POSITION_DECIMALS = 3
 
 @dataclass(frozen=True)
 class PadviaOptions:
-    nets: tuple[str, ...]
+    nets: tuple[str, ...] | None = None
     via: ViaSize | None = None
 
 
@@ -108,14 +111,36 @@ def _own_layer(pad: Pad) -> str:
     return layer
 
 
-def _candidates(snapshot: Snapshot, nets: Iterable[str]) -> list[Pad]:
-    wanted = set(nets)
+def _over_own_zone_elsewhere(snapshot: Snapshot, pad: Pad) -> bool:
+    """A zone of the pad's net covers it on a layer other than the pad's."""
+    layer = _own_layer(pad)
+    pt = Point(pad.position)
+    return any(
+        z.net == pad.net
+        and any(L != layer for L in z.layers)
+        and z.outline.contains(pt)
+        for z in snapshot.copper_zones
+    )
+
+
+def _candidates(snapshot: Snapshot, nets: Iterable[str] | None) -> list[Pad]:
     pads = [
         p
         for p in snapshot.pads
-        if p.net in wanted and p.kind == PadKind.SMD and len(p.shapes) == 1
+        if p.kind == PadKind.SMD
+        and len(p.shapes) == 1
+        and _over_own_zone_elsewhere(snapshot, p)
     ]
-    return sorted(pads, key=lambda p: p.position)
+    derived = nets is None
+    if derived:
+        nets = sorted({p.net for p in pads})
+    stitchable, _ = snapshot.split_stitchable(nets)
+    if derived:
+        logger.info(
+            "padvia: nets with a zone over their pads on another layer: "
+            + (", ".join(sorted(stitchable)) or "none")
+        )
+    return sorted((p for p in pads if p.net in stitchable), key=lambda p: p.position)
 
 
 def _plan_pad(
@@ -177,11 +202,10 @@ def _outward(snapshot: Snapshot, pad: Pad) -> tuple[float, float] | None:
 def plan_padvia(
     snapshot: Snapshot, options: PadviaOptions, forbidden: Sequence[Point2]
 ) -> Plan:
-    nets, _ = snapshot.split_stitchable(options.nets)
     obstacles = Obstacles(snapshot, forbidden)
     units: list[PlannedUnit] = []
     unfixable: list[UnfixableSpot] = []
-    candidates = _candidates(snapshot, nets)
+    candidates = _candidates(snapshot, options.nets)
     for pad in candidates:
         layer = _own_layer(pad)
         if _is_served(obstacles, pad, layer):

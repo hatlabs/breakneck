@@ -180,14 +180,6 @@ def fakes(monkeypatch):
 
 
 @pytest.fixture
-def log():
-    lines: list[str] = []
-    sink = logger.add(lambda m: lines.append(str(m)), format="{message}")
-    yield lines
-    logger.remove(sink)
-
-
-@pytest.fixture
 def info_log():
     lines: list[str] = []
     sink = logger.add(lambda m: lines.append(str(m)), format="{message}", level="INFO")
@@ -731,7 +723,10 @@ def test_clear_removes_the_returnvia_overlays(fakes, tmp_path, monkeypatch):
 
     cli.execute_clear(
         argparse.Namespace(
-            overlay_layers=list(overlay.DEFAULT_OVERLAY_LAYERS), dry_run=False
+            overlay_layers=list(overlay.DEFAULT_OVERLAY_LAYERS),
+            dry_run=False,
+            vias=False,
+            nets=None,
         )
     )
 

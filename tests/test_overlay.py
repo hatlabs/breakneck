@@ -828,7 +828,10 @@ def test_clear_removes_breakneck_overlays_and_keeps_other_images(monkeypatch):
     )
 
     args = argparse.Namespace(
-        overlay_layers=list(overlay.DEFAULT_OVERLAY_LAYERS), dry_run=False
+        overlay_layers=list(overlay.DEFAULT_OVERLAY_LAYERS),
+        dry_run=False,
+        vias=False,
+        nets=None,
     )
     cli.execute_clear(args)
 

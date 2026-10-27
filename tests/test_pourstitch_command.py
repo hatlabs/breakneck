@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 from kipy.geometry import Vector2
 from kipy.proto.board.board_types_pb2 import BoardLayer as BL
-from loguru import logger
 from shapely.geometry import box
 
 from breakneck import cli, drc, overlay, pourstitch_command
@@ -89,14 +88,6 @@ def fakes(monkeypatch):
     )
     monkeypatch.setattr(pourstitch_command, "run_placement", fake_run)
     return created, placements
-
-
-@pytest.fixture
-def log():
-    lines: list[str] = []
-    sink = logger.add(lambda m: lines.append(str(m)), format="{message}")
-    yield lines
-    logger.remove(sink)
 
 
 OPTIONS = Options(nets=("GND",))
@@ -296,7 +287,10 @@ def test_clear_removes_the_overlays_pourstitch_placed(
 
     cli.execute_clear(
         argparse.Namespace(
-            overlay_layers=list(overlay.DEFAULT_OVERLAY_LAYERS), dry_run=False
+            overlay_layers=list(overlay.DEFAULT_OVERLAY_LAYERS),
+            dry_run=False,
+            vias=False,
+            nets=None,
         )
     )
 

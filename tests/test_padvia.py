@@ -389,9 +389,10 @@ def test_via_must_sit_inside_fill_on_required_layers_other_than_pad_layer():
 
 
 def test_via_outside_second_zone_outline_is_unfixable():
+    x, y = CENTRE
     zones = [
         zone("GND", ("F.Cu",)),
-        zone("GND", ("B.Cu",), outline=box(20, 0, 30, 20)),
+        zone("GND", ("B.Cu",), outline=box(x - 0.1, y - 0.1, x + 0.1, y + 0.1)),
     ]
 
     plan = plan_padvia(snapshot([pad("GND", CENTRE)], zones=zones), GND, [])
@@ -497,3 +498,69 @@ def test_via_may_sit_within_the_via_in_pad_gap_of_its_own_pad():
     plan = plan_padvia(snapshot([pad("GND", (10.0004, 10.0))]), GND, [])
 
     assert plan.units[0].position == (10.7, 10.0)
+
+
+# ---- nets derived from zones -------------------------------------------------------
+
+ALL_NETS = PadviaOptions()
+
+
+def test_without_nets_a_pad_over_its_net_zone_on_another_layer_is_selected(log):
+    plan = plan_padvia(snapshot([pad("GND", (5, 5))]), ALL_NETS, [])
+
+    assert len(plan.units) == 1
+    assert any(
+        "padvia: nets with a zone over their pads on another layer: GND" in m
+        for m in log
+    )
+
+
+def test_without_nets_a_zone_on_the_pad_layer_only_does_not_select_it():
+    zones = [
+        zone("GND", ("F.Cu", "B.Cu")),
+        zone("+5V", ("F.Cu",)),
+        zone("+5V", ("B.Cu",), outline=box(20, 0, 30, 20)),
+    ]
+
+    plan = plan_padvia(snapshot([pad("+5V", (5, 5))], zones=zones), ALL_NETS, [])
+
+    assert plan.units == ()
+    assert plan.unfixable == ()
+
+
+def test_without_nets_a_pad_of_a_net_without_zones_is_not_selected(log):
+    plan = plan_padvia(snapshot([pad("SIG", (5, 5))]), ALL_NETS, [])
+
+    assert plan.units == ()
+    assert plan.unfixable == ()
+    assert any("on another layer: none" in m for m in log)
+
+
+def test_nets_restrict_the_derived_selection():
+    zones = [
+        zone("GND", ("F.Cu", "B.Cu"), outline=box(0, 0, 10, 20)),
+        zone("+3.3V", ("F.Cu", "B.Cu")),
+    ]
+    pads = [pad("GND", (5, 5)), pad("GND", (15, 15)), pad("+3.3V", (15, 5))]
+    snap = snapshot(pads, zones=zones)
+
+    assert len(plan_padvia(snap, ALL_NETS, []).units) == 2
+    plan = plan_padvia(snap, GND, [])
+    (unit,) = plan.units
+    assert unit.net == "GND"
+    assert Point(unit.position).distance(Point(5, 5)) < 2
+    assert plan.unfixable == ()
+
+
+def test_nets_skip_a_pad_without_its_net_zone_on_another_layer():
+    zones = [
+        zone("GND", ("F.Cu", "B.Cu")),
+        zone("+5V", ("F.Cu",)),
+        zone("+5V", ("B.Cu",), outline=box(20, 0, 30, 20)),
+    ]
+    snap = snapshot([pad("+5V", (5, 5))], zones=zones)
+
+    plan = plan_padvia(snap, PadviaOptions(("+5V",)), [])
+
+    assert plan.units == ()
+    assert plan.unfixable == ()

@@ -102,6 +102,7 @@ class Via:
     position: Point2
     diameter: float
     drill: float
+    locked: bool = False
 
 
 @dataclass(frozen=True, eq=False)
@@ -448,6 +449,7 @@ def _read_via(v: kipy.board_types.Via) -> Via:
         position=_mm(v.position),
         diameter=v.diameter / NM_PER_MM,
         drill=v.drill_diameter / NM_PER_MM,
+        locked=v.locked,
     )
 
 
