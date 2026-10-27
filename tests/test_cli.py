@@ -7,6 +7,11 @@ from loguru import logger
 import breakneck
 from breakneck import cli, overlay, placement, pourstitch_command, returnvia_command
 from breakneck.cli import parse_via_size
+from breakneck.plan import (
+    POURSTITCH_GROUND_DISTANCE,
+    POURSTITCH_POWER_DISTANCE,
+    StitchClass,
+)
 from breakneck.returnpath import NoBoardOutlineError
 from breakneck.returnvia import NoGroundNetsError
 from breakneck.snapshot import ViaSize
@@ -196,7 +201,7 @@ def test_returnvia_failure_exits_cleanly(monkeypatch, error):
     assert exit_info.value.code == 1
 
 
-def test_pourstitch_without_nets_stitches_every_stitchable_net(monkeypatch):
+def test_pourstitch_without_nets_stitches_every_net_of_the_class(monkeypatch):
     seen = []
     monkeypatch.setattr(
         pourstitch_command, "execute", lambda options, *a, **kw: seen.append(options)
@@ -207,8 +212,50 @@ def test_pourstitch_without_nets_stitches_every_stitchable_net(monkeypatch):
     assert seen[0].nets is None
 
 
+def pourstitch_options(monkeypatch, argv):
+    seen = []
+    monkeypatch.setattr(
+        pourstitch_command, "execute", lambda options, *a, **kw: seen.append(options)
+    )
+    cli.execute_pourstitch(parsed(monkeypatch, argv))
+    (options,) = seen
+    return options
+
+
 @pytest.mark.parametrize(
-    "error", [placement.SplitError("split"), placement.BoardChangedError("changed")]
+    ("argv", "stitch_class", "distance"),
+    [
+        ([], StitchClass.GROUND, POURSTITCH_GROUND_DISTANCE),
+        (["--power"], StitchClass.POWER, POURSTITCH_POWER_DISTANCE),
+        (["--distance", "4"], StitchClass.GROUND, 4.0),
+        (["--power", "--distance", "3"], StitchClass.POWER, 3.0),
+    ],
+)
+def test_pourstitch_distance_defaults_to_the_class_distance(
+    monkeypatch, argv, stitch_class, distance
+):
+    options = pourstitch_options(monkeypatch, ["pourstitch", *argv])
+
+    assert options.stitch_class is stitch_class
+    assert options.distance == distance
+
+
+def test_pourstitch_takes_ground_nets(monkeypatch):
+    options = pourstitch_options(
+        monkeypatch, ["pourstitch", "--ground-nets", "GND", "AGND"]
+    )
+
+    assert options.ground_nets == ("GND", "AGND")
+    assert pourstitch_options(monkeypatch, ["pourstitch"]).ground_nets is None
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        placement.SplitError("split"),
+        placement.BoardChangedError("changed"),
+        NoGroundNetsError("no ground"),
+    ],
 )
 def test_pourstitch_placement_failure_exits_cleanly(monkeypatch, error):
     def fail(*args, **kwargs):

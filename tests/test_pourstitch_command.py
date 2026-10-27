@@ -7,9 +7,10 @@ from kipy.geometry import Vector2
 from kipy.proto.board.board_types_pb2 import BoardLayer as BL
 from shapely.geometry import box
 
-from breakneck import cli, drc, overlay, pourstitch_command
+from breakneck import cli, drc, overlay, pourstitch_command, render
 from breakneck.commit import eco2_segment
 from breakneck.placement import RunResult, RunSettings
+from breakneck.plan import POURSTITCH_POWER_DISTANCE, StitchClass
 from breakneck.pourstitch import Options
 from breakneck.snapshot import NM_PER_MM, Snapshot, ViaSize, Zone
 
@@ -385,3 +386,43 @@ def test_unplaceable_run_without_maps_leaves_no_temporary_directory(fakes, png_d
     )
 
     assert not png_dir.exists()
+
+
+def test_power_check_measures_and_renders_at_the_power_distance(
+    fakes, log, monkeypatch, tmp_path: Path
+):
+    power_pour = box(20, 0, 30, 10)
+    snap = Snapshot(
+        copper_layers=LAYERS,
+        zones=[
+            Zone(n, LAYERS, 0, b, {L: b for L in LAYERS})
+            for n, b in (("GND", POUR), ("+3.3V", power_pour))
+        ],
+        edge_paths=[[(x, y) for x, y in box(0, 0, 30, 10).exterior.coords]],
+    )
+    monkeypatch.setattr(Snapshot, "from_board", staticmethod(lambda board: snap))
+    rendered = []
+    monkeypatch.setattr(
+        render,
+        "render_panels",
+        lambda path, snapshot, grid, maps, markers, distance, style: rendered.append(
+            (maps, distance)
+        ),
+    )
+    options = Options(
+        stitch_class=StitchClass.POWER, distance=POURSTITCH_POWER_DISTANCE
+    )
+
+    pourstitch_command.execute(
+        options,
+        overlay.Outputs(render=tmp_path / "heat.png"),
+        check=True,
+        kicad=KiCad(Board()),  # type: ignore[arg-type]
+    )
+
+    reports = [line for line in log if " on " in line and "existing stitches" in line]
+    assert reports and all(line.strip().startswith("+3.3V on") for line in reports)
+    assert all(f"beyond {POURSTITCH_POWER_DISTANCE:g} mm" in line for line in reports)
+    ((maps, distance),) = rendered
+    assert {m.net for m in maps} == {"+3.3V"}
+    assert distance == POURSTITCH_POWER_DISTANCE
