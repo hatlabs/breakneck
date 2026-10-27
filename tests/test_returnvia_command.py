@@ -177,6 +177,14 @@ def log():
     logger.remove(sink)
 
 
+@pytest.fixture
+def info_log():
+    lines: list[str] = []
+    sink = logger.add(lambda m: lines.append(str(m)), format="{message}", level="INFO")
+    yield lines
+    logger.remove(sink)
+
+
 def run(board, tmp_path=None, check=True, dry_run=False, **outputs):
     if tmp_path is not None:
         outputs.setdefault("overlay_dir", tmp_path)
@@ -273,6 +281,32 @@ def test_check_logs_each_unserved_via_plane_and_commits_nothing(fakes, log):
     distance = float(line.rsplit(":", 1)[1].split()[0])
     assert distance > 2 * DISTANCE
     assert any("1 of 1 vias unserved" in m and "1 of 2 via-plane" in m for m in log)
+
+
+def test_unserved_lines_are_debug_and_the_summary_info(fakes, log, info_log):
+    fakes.snap = slotted((SIG[0] + 1.4, SIG[1]))
+    fakes.snap.vias = [*fakes.snap.vias, via("SIG", (15.0, 5.0))]
+
+    run(Board())
+
+    assert [m for m in log if "unserved:" in m]
+    assert not [m for m in info_log if "unserved:" in m]
+    assert any("1 vias exempt" in m for m in info_log)
+    assert any("1 of 1 vias unserved" in m for m in info_log)
+
+
+def test_no_ground_fill_line_is_debug(fakes, log, info_log):
+    far = box(15, 0, 20, 10)
+    flush = BOARD.difference(antipads(SIG))
+    fakes.snap = snapshot(
+        returns=[("GND", (6.0, 5.0))],
+        zones=[gnd_zone({"In1.Cu": far, "In2.Cu": flush})],
+    )
+
+    run(Board())
+
+    assert [m for m in log if "no GND fill at the via" in m]
+    assert not [m for m in info_log if "no GND fill at the via" in m]
 
 
 def test_via_with_no_path_to_a_return_logs_an_infinite_distance(fakes, log):

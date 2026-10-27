@@ -130,10 +130,10 @@ def log_results(
         x, y = r.position
         where = f"  unserved: {r.net} at ({x:.3f}, {y:.3f})"
         if r.reason is not None:
-            logger.warning(f"{where}: {r.reason}")
+            logger.debug(f"{where}: {r.reason}")
         else:
             assert r.plane is not None
-            logger.warning(
+            logger.debug(
                 f"{where} on {r.plane.layer} ({r.plane.ground}): "
                 f"{r.distance:.2f} mm to a return"
             )
