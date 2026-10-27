@@ -291,6 +291,16 @@ def kipy_pad(pad_id, net, x, y, layers=(BL.BL_F_Cu,), override=None, parent=None
     return p
 
 
+def kipy_via(via_id, net, x, y, locked=False):
+    v = kbt.Via()
+    v.proto.id.value = via_id
+    v.net = kbt.Net()
+    v.net.name = net
+    v.position = Vector2.from_xy(nm(x), nm(y))
+    v.locked = locked
+    return v
+
+
 def kipy_footprint(fp_id, override=None):
     f = kbt.FootprintInstance()
     f.proto.id.value = fp_id
@@ -337,8 +347,10 @@ class FakeBoard:
         netclasses=None,
         drops_pads=False,
         layer_names=None,
+        vias=(),
     ):
         self.pads = list(pads)
+        self.vias = list(vias)
         self.zones = list(zones)
         self.footprints = list(footprints)
         self.layers = list(layers)
@@ -372,7 +384,7 @@ class FakeBoard:
         return []
 
     def get_vias(self):
-        return []
+        return self.vias
 
     def get_zones(self):
         return self.zones
@@ -432,6 +444,14 @@ def test_rule_area_keeps_its_via_keepout_and_has_no_fills():
     assert rule.outline.area == pytest.approx(25)
     assert copper.net == "GND" and not copper.keepout_vias
     assert sorted(copper.fills) == ["B.Cu", "F.Cu"]
+
+
+def test_via_lock_is_read_from_the_board():
+    vias = [kipy_via("free", "GND", 0, 0), kipy_via("held", "GND", 1, 0, locked=True)]
+
+    snap = read(FakeBoard(vias=vias))
+
+    assert [(v.id, v.locked) for v in snap.vias] == [("free", False), ("held", True)]
 
 
 def test_copper_layers_are_in_stack_order():
