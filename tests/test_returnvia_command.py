@@ -384,6 +384,21 @@ def test_track_narrower_than_a_pixel_stays_unbroken(fakes, tmp_path: Path):
     assert all(at(image, p)[3] == 255 for p in along)
 
 
+def test_ground_via_in_its_clearance_reads_its_own_return(fakes, tmp_path):
+    # The return sits in a clearance hole in both planes, bridged by thermal
+    # spokes: its own copper is the return, not a void.
+    ret = (6.0, 5.0)
+    plain = BOARD.difference(antipads(SIG, ret))
+    fakes.snap = snapshot(
+        returns=[("GND", ret)], zones=[gnd_zone({L: plain for L in INNER})]
+    )
+
+    run(Board(), tmp_path)
+
+    image = rgba(tmp_path / "returnvia-F_Cu.png")
+    assert at(image, ret) == palette_at(0.0)[0]
+
+
 def test_every_nets_copper_is_shown(fakes, tmp_path: Path):
     snap = snapshot(returns=[("GND", (6.0, 5.0))])
     gnd_pour, pwr_pour, pad_at = box(12, 0, 20, 4), box(12, 6, 20, 10), (8.0, 8.0)
