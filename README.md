@@ -116,13 +116,13 @@ Each placement run:
 
 Spots that need attention get markers on User.Eco2:
 
-- an X where no via fits (`returnvia` and `padvia`); on a `padvia` pad its arms reach past the pad, so copper drawn in front can't hide it;
+- an X where no via fits (`returnvia` and `padvia`), and after `returnvia --check --overlay` at each via with an unserved end; on a `padvia` pad its arms reach past the pad, so copper drawn in front can't hide it;
 - a + at a forced via (`returnvia --force`);
 - a square at a new DRC violation that couldn't be pinned on a single via.
 
 Other nets' pours are not obstacles, so a single via can cut a narrow neck of another net's pour. DRC reports that as unconnected items or isolated copper and names the pour's pads or zones, not the via. breakneck counts these violations per net, in DRC of the board as it is and with the planned vias added. When a net's count goes up, the run commits nothing and exits with an error naming the net and listing the violations. An existing violation that DRC reports at different items after the refill leaves the count unchanged, so it gets a marker but doesn't stop the run. `--allow-splits` (on `returnvia`, `padvia` and `pourstitch`) commits anyway, with a square marker at each violation for fixing by hand. A dry run lists them without failing.
 
-`pourstitch` doesn't mark uncovered spots; its heatmap shows them as areas. Each placing `returnvia`, `padvia` or `pourstitch` run replaces the previous markers, whichever command made them: it removes every shape on User.Eco2, hand-drawn ones included, in the same undo step, also when it places nothing. So after `padvia` then `pourstitch`, only `pourstitch`'s markers remain. `--check` runs leave the markers alone. A dry run removes nothing. `breakneck clear` removes the markers without a run.
+`pourstitch` doesn't mark uncovered spots; its heatmap shows them as areas. Each placing `returnvia`, `padvia` or `pourstitch` run that doesn't stop with an error replaces the previous markers, whichever command made them: it removes every shape on User.Eco2, hand-drawn ones included, in the same undo step, also when it places nothing. So after `padvia` then `pourstitch`, only `pourstitch`'s markers remain. A `--check --overlay` run replaces them too, in the undo step that places the overlay images: `returnvia` draws an X at each via with an unserved end, matching the heatmap's rings, and `pourstitch` only removes the old markers. A `--check --overlay` run with nothing to show, such as a `returnvia` check with every via end served, still removes the old markers. A `--check` run without `--overlay`, or one that can't place overlays, as in a dry run with the overlay layers disabled, leaves the markers alone, as does a dry run of a placing command. `breakneck clear` removes the markers without a run.
 
 `returnvia --force` adds a second pass: every via still without a return gets one at the spot with the most clearance, never overlapping other-net copper. These vias may violate clearance. They survive the DRC check despite that, and get a marker so you can fix them by hand. A forced via is a placeholder that may lie outside the ground fill, so it serves nothing: the run's log and heatmaps still count its via as unserved. Other vias of the same ground net within `--distance` of it in a straight line get no forced via of their own; they are reported unfixable with "relies on forced via at (x, y)" and get an X. After moving it, refill the zones and run `returnvia --check` to confirm. Via ends outside every ground zone, or with no ground fill near the via, are never forced.
 
@@ -154,7 +154,7 @@ Notes:
 
 ### Dry runs
 
-`breakneck --dry-run <command>` plans, runs DRC, logs what it would place and writes `--render` output, but commits no vias or markers. The zone refill before planning still runs, and `--overlay` still places its images. The heatmaps include the planned vias: for `returnvia` they count as returns, except forced ones, so a dry run shows which via ends the run would leave unserved.
+`breakneck --dry-run <command>` plans, runs DRC, logs what it would place and writes `--render` output, but commits no vias or markers. The zone refill before planning still runs, and `--overlay` still places its images, together with the markers of a `--check` run. The heatmaps include the planned vias: for `returnvia` they count as returns, except forced ones, so a dry run shows which via ends the run would leave unserved.
 
 ### Heatmaps
 
@@ -166,7 +166,7 @@ Notes:
 
 `pourstitch --overlay` and `returnvia --overlay` place one transparent image per copper layer on the board as a reference image, scaled and positioned to line up with the copper. The images go on User.1–User.4, one per copper layer in stack order, or on the layers given with `--overlay-layers`. Those layers must be enabled in Board Setup → Board Editor Layers. Each image carries its colourbar and label in a strip below the board outline. The board stores the images itself; the PNGs are written to a temporary directory and removed once placed. When they can't be placed, as in a dry run with the layers disabled, they stay there and the log lists their paths and placements. Toggle a layer's visibility to show or hide its heatmap, and remove them with `breakneck clear`. Both `clear` and a new `--overlay` replace only breakneck's own overlays, recognised by a `breakneck` text chunk in the PNG, also after the board outline has changed. Other reference images on those layers stay. Overlays placed by earlier breakneck versions carry no tag and are recognised only at their position and scale for the current board outline; after an outline change, delete those by hand.
 
-`pourstitch --check` and `returnvia --check` measure the existing vias only: no planning, no DRC and no vias. Combine them with `--render` or `--overlay` to see the current coverage. Every `--overlay` run commits its images and so adds an undo step. For repeated checks while placing vias by hand, use `--check --render` and keep the PNG open in an image viewer that reloads it; use `--overlay` for a one-off look on the board:
+`pourstitch --check` and `returnvia --check` measure the existing vias only: no planning, no DRC and no vias. Combine them with `--render` or `--overlay` to see the current coverage. Every `--overlay` run commits its images and so adds an undo step; with `--check`, that step also replaces the markers. For repeated checks while placing vias by hand, use `--check --render` and keep the PNG open in an image viewer that reloads it; use `--overlay` for a one-off look on the board:
 
 ```bash
 breakneck returnvia --check --render returnvia.png
