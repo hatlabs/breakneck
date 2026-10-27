@@ -396,14 +396,14 @@ def parse_args():
     _add_ground_nets_argument(gnd_via_parser)
 
     padvia_parser = subparsers.add_parser(
-        "padvia", help="Place a via and stub for every unserved SMD pad of given nets"
+        "padvia", help="Place a via and stub for every unserved SMD pad"
     )
     padvia_parser.add_argument(
         "--nets",
         nargs="+",
         metavar="NET",
-        required=True,
-        help="Nets whose SMD pads get vias",
+        help="Nets whose SMD pads get vias, among pads with a zone of their "
+        "net over them on another layer (default: every such net)",
     )
     padvia_parser.add_argument(
         "--via",
@@ -549,7 +549,9 @@ def _warn_unclearable_nets(snapshot: Snapshot, nets: Sequence[str] | None) -> No
 
 
 def execute_padvia(args):
-    options = PadviaOptions(nets=tuple(args.nets), via=args.via)
+    options = PadviaOptions(
+        nets=None if args.nets is None else tuple(args.nets), via=args.via
+    )
     settings = RunSettings(
         "padvia",
         dry_run=args.dry_run,

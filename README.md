@@ -22,7 +22,7 @@ The screenshot shows `gndvia` output: yellow lines from signal vias that lack a 
 
 ### Pad stitching vias
 
-`padvia --nets GND +3.3V` gives every SMD pad of the listed nets a via and a short stub track into the net's plane or pour, unless the pad already reaches a same-net via within 1 mm through its tracks, pads or pour. The via goes on the side of the pad facing away from the footprint centre where there is room.
+`padvia` gives every SMD pad over a zone of its own net on another copper layer a via and a short stub track into the net's plane or pour, unless the pad already reaches a same-net via within 1 mm through its tracks, pads or pour. The via goes on the side of the pad facing away from the footprint centre where there is room. `--nets GND +3.3V` limits it to those pads of the listed nets. Keep `--nets` when a net meant to join its plane at a single point, such as a star ground, has a zone under its pads; leave that net out of the list.
 
 ### Pour stitching vias
 
@@ -87,7 +87,7 @@ Run `breakneck -h`, or `breakneck <command> -h`, to see the available options.
 
 ```bash
 breakneck returnvia
-breakneck padvia --nets GND GND_ISO +3.3V +5V_ISO
+breakneck padvia
 breakneck pourstitch --nets GND GND_ISO +3.3V +5V_ISO --overlay
 ```
 
@@ -125,7 +125,7 @@ Notes:
 
 `breakneck clear --vias` removes stitching vias along with the markers and overlays, so `pourstitch` and `returnvia` can place a fresh set after layout changes. A via goes when it touches a fill of its own net on at least one layer and no track or pad of its net touches it. Vias in pads, fanout vias at the end of a track and locked vias stay. `--nets NET [NET ...]` limits the removal to those nets; by default every net with a zone is cleared. The removal is one undo step, followed by a zone refill. With `--dry-run` it logs how many vias per net would go and removes nothing.
 
-**This removes every via touching a pour of its own net that no track or pad ties down, including vias placed by hand.** That includes fanout vias tied to a pad only through a pour, and vias that are the only link between two pours of the same net. To keep such a via, connect it with a short track or lock it. To restore a board after clearing, run `clear --vias`, then `padvia --nets NET [NET ...]` (it re-adds a via with a stub track for each SMD pad, and the stubs keep those vias through later clears), then `returnvia`, then `pourstitch`, which restitches overlapping pours. As above, `pourstitch` goes last.
+**This removes every via touching a pour of its own net that no track or pad ties down, including vias placed by hand.** That includes fanout vias tied to a pad only through a pour, and vias that are the only link between two pours of the same net. To keep such a via, connect it with a short track or lock it. To restore a board after clearing, run `clear --vias`, then `padvia` (it re-adds a via with a stub track for each SMD pad, and the stubs keep those vias through later clears), then `returnvia`, then `pourstitch`, which restitches overlapping pours. As above, `pourstitch` goes last.
 
 ### Dry runs
 
