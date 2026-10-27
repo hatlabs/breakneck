@@ -41,13 +41,15 @@ ANTIPAD = 0.5
 VIA = ViaSize(0.6, 0.3)
 OPTIONS = ReturnViaOptions(distance=DISTANCE)
 STYLE = returnvia_command.STYLE
-WHITE = (255, 255, 255, 255)
+RING = (0xFF, 0x2A, 0x6D, 0xFF)
 # The panels' axes frames are the only black in a --render figure.
 FRAME_MAX_RGB_SUM = 20
 MIN_FRAME_PX = 100
-# A ring is an antialiased white hairline, a pixel either side of where it is
-# drawn: it lifts every channel, which no colour of the scale has this high.
-RING_MIN_CHANNEL = 130
+# Off copper, a ring is an antialiased pink hairline over the near-black
+# background, a pixel either side of where it is drawn: red well above the
+# background and above green and blue.
+RING_MIN_RED = 100
+RING_RED_OVER_GREEN = 50
 RING_REACH_PX = 1
 
 
@@ -239,7 +241,8 @@ def ring_near(image: np.ndarray, frame: tuple[slice, slice], point) -> bool:
     c = frame[1].start + round((point[0] - x0 + render.MARGIN_MM) * px_per_mm)
     k = RING_REACH_PX
     near = image[r - k : r + k + 1, c - k : c + k + 1]
-    return bool((near.min(axis=2) >= RING_MIN_CHANNEL).any())
+    red, green = near[..., 0], near[..., 1]
+    return bool(((red >= RING_MIN_RED) & (red - green >= RING_RED_OVER_GREEN)).any())
 
 
 def test_check_overlay_images_only_the_via_ends_signal_layers(fakes, tmp_path):
@@ -286,7 +289,7 @@ def test_unserved_end_gets_a_ring_only_on_its_signal_layer(fakes, tmp_path: Path
     run(Board(), tmp_path)
 
     off_copper = (SIG[0], SIG[1] - DISTANCE)
-    assert at(rgba(tmp_path / "returnvia-F_Cu.png"), off_copper) == WHITE
+    assert at(rgba(tmp_path / "returnvia-F_Cu.png"), off_copper) == RING
     assert at(rgba(tmp_path / "returnvia-B_Cu.png"), off_copper)[3] == 0
 
 
@@ -481,8 +484,8 @@ def test_layer_outside_every_ground_zone_is_logged_and_counted(fakes, log, tmp_p
     assert any("1 of 1 vias unserved" in m for m in log)
     # Only the F.Cu end is unserved: B.Cu references F.Cu's ground.
     off_copper = (SIG[0], SIG[1] - DISTANCE)
-    assert at(rgba(tmp_path / "returnvia-F_Cu.png"), off_copper) == WHITE
-    assert not (rgba(tmp_path / "returnvia-B_Cu.png") == WHITE).all(axis=2).any()
+    assert at(rgba(tmp_path / "returnvia-F_Cu.png"), off_copper) == RING
+    assert not (rgba(tmp_path / "returnvia-B_Cu.png") == RING).all(axis=2).any()
 
 
 def test_every_via_served_logs_zero_and_draws_no_ring(fakes, log, tmp_path):
@@ -493,7 +496,7 @@ def test_every_via_served_logs_zero_and_draws_no_ring(fakes, log, tmp_path):
     assert not [m for m in log if "unserved:" in m]
     assert any("0 of 1 vias unserved" in m for m in log)
     for name in ("returnvia-F_Cu.png", "returnvia-B_Cu.png"):
-        assert not (rgba(tmp_path / name) == WHITE).all(axis=2).any()
+        assert not (rgba(tmp_path / name) == RING).all(axis=2).any()
 
 
 def test_exempt_vias_are_counted(fakes, log):
@@ -597,7 +600,7 @@ def test_dry_run_overlay_shows_the_planned_vias(fakes, log, tmp_path: Path):
     unreachable = colour(STYLE.unreachable_colour)
     assert at(image, ON_TRACK)[3] == 255
     assert at(image, ON_TRACK) != unreachable
-    assert not (image == WHITE).all(axis=2).any()
+    assert not (image == RING).all(axis=2).any()
 
 
 def test_forced_vias_serve_nothing(fakes, log):
@@ -761,8 +764,8 @@ def test_no_ground_fill_end_is_logged_and_ringed(fakes, log, tmp_path: Path):
         "SIG at (5.000, 5.000): no GND fill at the via on In1.Cu"
     )
     off_copper = (SIG[0], SIG[1] - DISTANCE)
-    assert at(rgba(tmp_path / "returnvia-F_Cu.png"), off_copper) == WHITE
-    assert at(rgba(tmp_path / "returnvia-B_Cu.png"), off_copper) != WHITE
+    assert at(rgba(tmp_path / "returnvia-F_Cu.png"), off_copper) == RING
+    assert at(rgba(tmp_path / "returnvia-B_Cu.png"), off_copper) != RING
 
 
 def test_render_creates_the_missing_parent_directory(fakes, tmp_path: Path):

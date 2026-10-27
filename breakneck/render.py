@@ -56,7 +56,8 @@ class HeatmapStyle:
     `colormap` is a matplotlib colormap or its name. The colour scale runs
     from 0 to `scale` × the distance. Without an over
     colour, values above it saturate at its top. Unreachable copper
-    (infinite distance) has its own colour.
+    (infinite distance) has its own colour. Rings are drawn in
+    `ring_colour`, the other markers in `MARKER_COLOUR`.
     """
 
     title: str
@@ -66,6 +67,7 @@ class HeatmapStyle:
     over_colour: str | None
     unreachable_colour: str
     scale: float = 1.0
+    ring_colour: str = MARKER_COLOUR
 
 
 Disc = tuple[Point2, float]
@@ -222,7 +224,11 @@ def render_panels(
         for centre, radius in marks.rings:
             ax.add_patch(
                 Circle(
-                    centre, radius, fill=False, color=MARKER_COLOUR, lw=RING_LINE_WIDTH
+                    centre,
+                    radius,
+                    fill=False,
+                    color=style.ring_colour,
+                    lw=RING_LINE_WIDTH,
                 )
             )
         for centre, radius in marks.dots:
@@ -263,14 +269,18 @@ def render_panels(
 
 
 def _draw_ring(
-    rgba: npt.NDArray[np.uint8], grid: Grid, centre: Point2, radius: float
+    rgba: npt.NDArray[np.uint8],
+    grid: Grid,
+    centre: Point2,
+    radius: float,
+    colour: str,
 ) -> None:
     half = OVERLAY_RING_WIDTH_MM / 2
     rs, cs = grid.window(grid.index(centre), radius + half)
     dx = grid.xs[cs][np.newaxis, :] - centre[0]
     dy = grid.ys[rs][:, np.newaxis] - centre[1]
     on = np.abs(np.hypot(dx, dy) - radius) <= half
-    rgba[rs, cs][on] = _rgba_bytes(MARKER_COLOUR)
+    rgba[rs, cs][on] = _rgba_bytes(colour)
 
 
 def overlay_rgba(
@@ -298,7 +308,7 @@ def overlay_rgba(
         rgba[m.excluded] = _rgba_bytes(EXCLUDED_COLOUR)
     rings = {r for m in maps for r in markers.get((m.net, m.layer), NO_MARKERS).rings}
     for centre, radius in rings:
-        _draw_ring(rgba, grid, centre, radius)
+        _draw_ring(rgba, grid, centre, radius, style.ring_colour)
     return rgba
 
 

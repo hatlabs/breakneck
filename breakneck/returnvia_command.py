@@ -44,6 +44,8 @@ STILL_SERVED_COLOUR = "#6b7d8c"
 UNSERVED_COLORMAP = "plasma_r"
 UNSERVED_SAMPLES = 64
 UNREACHABLE_COLOUR = "#b44dff"
+# Pink stands out on both ends of the palette and on the board.
+RING_COLOUR = "#ff2a6d"
 COPPER_MAP_NET = "copper"
 # Reach past a via's edge over its antipad, the void around it in the plane.
 ANTIPAD_REACH = 0.3
@@ -68,7 +70,7 @@ PALETTE = matplotlib.colors.LinearSegmentedColormap.from_list(
 STYLE = render.HeatmapStyle(
     title=(
         "Return vias: copper coloured by the distance to the nearest ground "
-        "return through its reference plane; ring = unserved via end, yellow "
+        "return through its reference plane; pink ring = unserved via end, yellow "
         "to dark blue = beyond the distance, purple = no path to a return"
     ),
     colourbar_label=(
@@ -80,6 +82,7 @@ STYLE = render.HeatmapStyle(
     over_colour=None,
     unreachable_colour=UNREACHABLE_COLOUR,
     scale=SCALE,
+    ring_colour=RING_COLOUR,
 )
 
 
