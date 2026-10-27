@@ -61,7 +61,7 @@ UNREACHABLE = 1e6
 
 @dataclass(frozen=True)
 class Options:
-    nets: tuple[str, ...]
+    nets: tuple[str, ...] | None = None
     distance: float = POURSTITCH_DISTANCE
     via: ViaSize | None = None
     fallback_via: ViaSize = POURSTITCH_FALLBACK_VIA
@@ -93,6 +93,22 @@ def via_sizes(snapshot: Snapshot, options: Options, net: str) -> tuple[ViaSize, 
     return tuple(dict.fromkeys((default, options.fallback_via)))
 
 
+def _stitchable_nets(snapshot: Snapshot, nets: tuple[str, ...] | None) -> list[str]:
+    if nets is None:
+        zoned = sorted({z.net for z in snapshot.copper_zones if z.net is not None})
+        stitchable, _ = snapshot.split_stitchable(zoned)
+        logger.info(
+            "pourstitch: nets with pours on two or more layers: "
+            + (", ".join(stitchable) or "none")
+        )
+        return stitchable
+    present = [n for n in nets if snapshot.zone_layers(n)]
+    for n in sorted(set(nets) - set(present)):
+        logger.warning(f"Net {n} has no copper zones; skipping")
+    stitchable, _ = snapshot.split_stitchable(present)
+    return stitchable
+
+
 class _Context:
     """Rasters that depend only on the snapshot and the options."""
 
@@ -102,10 +118,7 @@ class _Context:
         self.snapshot = snapshot
         self.options = options
         self.grid = g = Grid.covering(snapshot.board_outline.bounds)
-        present = [n for n in options.nets if snapshot.zone_layers(n)]
-        for n in sorted(set(options.nets) - set(present)):
-            logger.warning(f"Net {n} has no copper zones; skipping")
-        self.nets, _ = snapshot.split_stitchable(present)
+        self.nets = _stitchable_nets(snapshot, options.nets)
 
         self.layers: dict[str, list[str]] = {}
         self.fill: dict[tuple[str, str], BoolMap] = {}

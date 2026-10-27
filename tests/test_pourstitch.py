@@ -256,6 +256,55 @@ def test_net_with_one_zone_layer_is_skipped():
     assert plan.units == ()
 
 
+def _two_net_snapshot():
+    """GND poured on both layers, SW only on F.Cu."""
+    gnd = Zone(
+        NET,
+        TWO_LAYERS,
+        0,
+        box(0, 0, 10, 10),
+        {L: box(0, 0, 10, 10) for L in TWO_LAYERS},
+    )
+    sw = Zone("SW", ("F.Cu",), 0, box(20, 0, 30, 10), {"F.Cu": box(20, 0, 30, 10)})
+    return Snapshot(
+        copper_layers=TWO_LAYERS,
+        zones=[gnd, sw],
+        edge_paths=outline_paths(box(0, 0, 30, 10)),
+        via_sizes={NET: VIA},
+    )
+
+
+def test_without_nets_every_net_with_pours_on_two_layers_is_stitched(log):
+    snap = _two_net_snapshot()
+
+    plan = PourStitcher()(snap, Options(nets=None, distance=D), [])
+
+    assert plan.units
+    assert {u.net for u in plan.units} == {NET}
+    assert any(
+        "pourstitch: nets with pours on two or more layers: GND" in m for m in log
+    )
+
+
+def test_nets_restrict_the_stitched_nets():
+    zones = [
+        Zone(n, TWO_LAYERS, 0, b, {L: b for L in TWO_LAYERS})
+        for n, b in ((NET, box(0, 0, 10, 10)), ("+3.3V", box(20, 0, 30, 10)))
+    ]
+    snap = Snapshot(
+        copper_layers=TWO_LAYERS,
+        zones=zones,
+        edge_paths=outline_paths(box(0, 0, 30, 10)),
+        via_sizes={NET: VIA, "+3.3V": VIA},
+    )
+
+    everything = PourStitcher()(snap, Options(nets=None, distance=D), [])
+    restricted = PourStitcher()(snap, options(), [])
+
+    assert {u.net for u in everything.units} == {NET, "+3.3V"}
+    assert {u.net for u in restricted.units} == {NET}
+
+
 def test_via_override_is_used_for_lattice():
     snap = pour_snapshot(box(0, 0, 10, 10))
     big = ViaSize(0.8, 0.4)
