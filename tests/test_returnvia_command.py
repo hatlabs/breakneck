@@ -13,12 +13,24 @@ from shapely.geometry import LineString, Point, box
 from shapely.ops import unary_union
 
 from breakneck import cli, drc, overlay, pourstitch_command, render, returnvia_command
-from breakneck.commit import eco2_segment
+from breakneck.commit import (
+    MARKER_LAYER,
+    Marker,
+    MarkerKind,
+    eco2_segment,
+    marker_items,
+)
 from breakneck.placement import RunResult
 from breakneck.plan import QUANTISATION, Plan, PlannedUnit
 from breakneck.pourstitch import Options
 from breakneck.raster import CoverageMap, Grid
-from breakneck.returnpath import NoBoardOutlineError, ReturnFields, measure_returns
+from breakneck.returnpath import (
+    NoBoardOutlineError,
+    Outcome,
+    PlaneReturn,
+    ReturnFields,
+    measure_returns,
+)
 from breakneck.returnvia import NoGroundNetsError, ReferencePlane, ReturnViaOptions
 from breakneck.snapshot import (
     NM_PER_MM,
@@ -100,9 +112,10 @@ def slotted(ret):
 
 
 class Board:
-    def __init__(self, images=(), outline=BOARD, enabled=USER):
+    def __init__(self, images=(), outline=BOARD, enabled=USER, shapes=()):
         self.calls: list = []
         self.images = list(images)
+        self.shapes = list(shapes)
         self.removed: list = []
         self.outline = outline
         self.enabled = [BL.BL_F_Cu, BL.BL_In1_Cu, BL.BL_In2_Cu, BL.BL_B_Cu, *enabled]
@@ -115,12 +128,12 @@ class Board:
 
     def get_shapes(self):
         if self.outline is None:
-            return []
+            return list(self.shapes)
         corners = list(self.outline.exterior.coords)
         edges = [eco2_segment(a, b) for a, b in pairwise(corners)]
         for e in edges:
             e.layer = BL.BL_Edge_Cuts
-        return edges
+        return edges + self.shapes
 
     def get_reference_images(self):
         return self.images
@@ -305,7 +318,7 @@ def test_map_shows_only_the_copper_inside_the_unserved_ends_rings(fakes):
     assert at(front, IN_RING) == field_colour(fakes.snap, plane, IN_RING)
     assert at(front, ON_TRACK)[3] == 0
     # No end is unserved on B.Cu: it gets no image.
-    assert [i.layer for i in fakes.created] == [BL.BL_User_1]
+    assert [i.layer for i in fakes.created if i.layer in USER] == [BL.BL_User_1]
 
 
 def test_full_map_shows_all_copper(fakes):
@@ -1170,3 +1183,100 @@ def test_render_creates_the_missing_parent_directory(fakes, tmp_path: Path):
     run(Board(), render=path)
 
     assert path.exists()
+
+
+def old_marker():
+    return eco2_segment((1.0, 1.0), (2.0, 2.0))
+
+
+def eco2_created(fakes) -> list:
+    return [i.proto for i in fakes.created if i.layer == MARKER_LAYER]
+
+
+def test_check_overlay_replaces_markers_with_an_x_per_unserved_end(fakes):
+    # In1's slot leaves the F.Cu end unserved; the B.Cu end is served.
+    fakes.snap = slotted((SIG[0] + 1.4, SIG[1]))
+    stale = old_marker()
+    board = Board(shapes=[stale])
+
+    run(board, overlay=True)
+
+    assert board.calls == [
+        "refill_zones",
+        "begin_commit",
+        "remove_items",
+        ("push_commit", returnvia_command.OVERLAY_COMMIT),
+    ]
+    assert stale in board.removed
+    expected = marker_items([Marker(SIG, MarkerKind.UNFIXABLE)])
+    assert eco2_created(fakes) == [i.proto for i in expected]
+
+
+def test_check_overlay_with_every_end_served_only_removes_markers(fakes):
+    fakes.snap = snapshot(returns=[("GND", (6.0, 5.0))])
+    stale = old_marker()
+    board = Board(shapes=[stale])
+
+    run(board, overlay=True)
+
+    assert board.calls == [
+        "refill_zones",
+        "begin_commit",
+        "remove_items",
+        ("push_commit", returnvia_command.OVERLAY_COMMIT),
+    ]
+    assert board.removed == [stale]
+    assert fakes.created == []
+
+
+def test_check_without_overlay_leaves_the_markers(fakes, tmp_path):
+    fakes.snap = slotted((SIG[0] + 1.4, SIG[1]))
+    board = Board(shapes=[old_marker()])
+
+    run(board, render=tmp_path / "heat.png")
+
+    assert board.calls == ["refill_zones"]
+
+
+def test_check_overlay_not_placed_leaves_the_markers(fakes, png_dir):
+    fakes.snap = slotted((SIG[0] + 1.4, SIG[1]))
+    board = Board(enabled=(), shapes=[old_marker()])
+
+    run(board, overlay=True, dry_run=True)
+
+    assert board.calls == ["refill_zones"]
+    assert fakes.created == []
+
+
+def test_placing_run_overlay_leaves_the_markers_to_the_placement(fakes):
+    fakes.snap = slotted((SIG[0] + 1.4, SIG[1]))
+    stale = old_marker()
+    board = Board(shapes=[stale])
+
+    run(board, overlay=True, check=False, dry_run=True)
+
+    assert stale not in board.removed
+    assert eco2_created(fakes) == []
+
+
+def test_unserved_markers_put_one_x_at_each_via_with_an_unserved_end():
+    def end(position, layer, served):
+        plane = ReferencePlane("In1.Cu" if layer == "F.Cu" else "In2.Cu", "GND")
+        return PlaneReturn(
+            position, "SIG", (layer,), plane, 1.0, served, Outcome.MEASURED
+        )
+
+    both_unserved, one_unserved, served = (0, 0), (5, 0), (10, 0)
+    results = [
+        end(both_unserved, "F.Cu", False),
+        end(both_unserved, "B.Cu", False),
+        end(one_unserved, "F.Cu", True),
+        end(one_unserved, "B.Cu", False),
+        end(served, "F.Cu", True),
+        end(served, "B.Cu", True),
+    ]
+
+    assert returnvia_command.unserved_markers(results) == (
+        Marker(both_unserved, MarkerKind.UNFIXABLE),
+        Marker(one_unserved, MarkerKind.UNFIXABLE),
+    )

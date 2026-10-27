@@ -16,6 +16,7 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from breakneck import overlay, render
+from breakneck.commit import Marker, MarkerKind
 from breakneck.placement import RunSettings, measure_only, run_placement
 from breakneck.plan import QUANTISATION, PlannedUnit
 from breakneck.raster import BoolMap, CoverageMap, Grid
@@ -303,6 +304,13 @@ def markers(
     }
 
 
+def unserved_markers(results: Sequence[PlaneReturn]) -> tuple[Marker, ...]:
+    """An X at each via with an unserved end, where the heatmaps ring it,
+    sized as a placing run's unfixable markers."""
+    positions = dict.fromkeys(r.position for r in results if not r.served)
+    return tuple(Marker(p, MarkerKind.UNFIXABLE) for p in positions)
+
+
 def ring_maps(
     maps: Sequence[CoverageMap],
     marks: Mapping[render.MapKey, render.Markers],
@@ -362,10 +370,11 @@ def execute(
     """Run returnvia against the open board.
 
     `check` only measures the existing returns: no planning, no kicad-cli,
-    no vias or markers. Planned vias count as returns in the measurement,
-    except forced ones. The heatmaps show only the copper around unserved
-    via ends, or with `full_map` all copper. Overlays are placed in their
-    own commit, also in a dry run.
+    no vias. With overlays, it replaces the markers with an X at each
+    unserved via in the overlay commit. Planned vias count as returns in
+    the measurement, except forced ones. The heatmaps show only the copper
+    around unserved via ends, or with `full_map` all copper. Overlays are
+    placed in their own commit, also in a dry run.
     """
     kicad = kicad or kipy.KiCad()
     board = kicad.get_board()
@@ -441,4 +450,5 @@ def execute(
             outputs,
             place_overlay,
             OVERLAY_COMMIT,
+            unserved_markers(results) if check else None,
         )

@@ -23,7 +23,13 @@ from kipy.geometry import Vector2
 from kipy.util.board_layer import canonical_name, layer_from_canonical_name
 from loguru import logger
 
-from breakneck.commit import CreateItemsError, create_checked
+from breakneck.commit import (
+    CreateItemsError,
+    Marker,
+    create_checked,
+    marker_items,
+    marker_shapes,
+)
 from breakneck.plan import POURSTITCH_PIXEL, raster_size
 from breakneck.snapshot import NM_PER_MM, Point2, Snapshot
 
@@ -212,24 +218,30 @@ def place_overlays(
     placement: ImagePlacement,
     overlay_layers: Sequence[str],
     commit_label: str,
+    markers: Sequence[Marker] | None = None,
 ) -> bool:
     """Replace breakneck's overlays on the overlay layers in one commit.
 
     `placement` is the board's overlay placement, which finds untagged
     overlays of earlier builds. With no images, the previous set is only
     removed; with nothing to remove either, nothing is committed. Other
-    reference images on those layers are left alone. If KiCad refuses an
-    image, nothing changes and the log says where to place the PNGs by hand.
+    reference images on those layers are left alone. `markers`, unless None,
+    replace every shape on the marker layer in the same commit. If KiCad
+    refuses an item, nothing changes and the log says where to place the
+    PNGs by hand.
     """
     old = overlays_on(board, overlay_layers, placement)
-    if not images and not old:
+    stale = marker_shapes(board.get_shapes()) if markers is not None else []
+    if not images and not old and not stale and not markers:
         return True
     commit = board.begin_commit()
     try:
-        if old:
-            board.remove_items(old)
+        if old or stale:
+            board.remove_items([*old, *stale])
         if images:
             create_checked(board, [_reference_image(i) for i in images])
+        if markers:
+            create_checked(board, marker_items(markers))
     except CreateItemsError as e:
         board.drop_commit(commit)
         logger.warning(f"KiCad refused the overlay images ({e}); place them by hand:")
@@ -245,8 +257,12 @@ def place_overlays(
             f"Placed {len(images)} overlay images"
             + (f", replacing {len(old)}" if old else "")
         )
-    else:
+    elif old:
         logger.info(f"Removed {len(old)} overlay images")
+    if markers is not None and (markers or stale):
+        logger.info(
+            f"Replaced {len(stale)} marker shapes on User.Eco2 with {len(markers)} markers"
+        )
     for i in images:
         logger.info(f"  {i.describe()}")
     return True
@@ -259,10 +275,12 @@ def show_overlays(
     outputs: Outputs,
     place: bool,
     commit_label: str,
+    markers: Sequence[Marker] | None = None,
 ) -> None:
     """Write the per-copper-layer PNGs and place them as this run's overlay
     set, or log where they would go. `write_pngs` None means no images: the
-    previous set is only removed.
+    previous set is only removed. `markers`, unless None, replace the marker
+    layer's shapes in the overlay commit, so they change only if it lands.
 
     The board embeds the image data, so the PNGs go to a temporary directory
     that is removed once they are placed. When they are not, they stay there
@@ -274,7 +292,9 @@ def show_overlays(
     placement = board_placement(bounds)
     if write_pngs is None:
         if place:
-            place_overlays(board, [], placement, outputs.overlay_layers, commit_label)
+            place_overlays(
+                board, [], placement, outputs.overlay_layers, commit_label, markers
+            )
         return
     out_dir = Path(tempfile.mkdtemp(prefix=PNG_DIR_PREFIX))
     try:
@@ -291,7 +311,7 @@ def show_overlays(
             for L, path in pngs.items()
         ]
         placed = place and place_overlays(
-            board, images, placement, outputs.overlay_layers, commit_label
+            board, images, placement, outputs.overlay_layers, commit_label, markers
         )
     except BaseException:
         shutil.rmtree(out_dir)
