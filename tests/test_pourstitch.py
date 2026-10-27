@@ -608,7 +608,7 @@ def test_ground_nets_override_detection():
 def test_misspelled_ground_net_is_warned_about(log, grounds, warned):
     PourStitcher()(ground_and_power_snapshot(), ground(ground_nets=grounds), [])
 
-    assert bool([m for m in log if "GDN" in m and "no copper" in m]) is warned
+    assert bool([m for m in log if "has no zones, vias or pads" in m]) is warned
 
 
 def no_ground_snapshot():
