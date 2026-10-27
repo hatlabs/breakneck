@@ -262,3 +262,16 @@ def test_loguru_level_shows_debug(monkeypatch, capsys):
     logger.debug("per-via detail")
 
     assert "per-via detail" in capsys.readouterr().err
+
+
+@pytest.mark.usefixtures("restore_default_sink")
+def test_main_logs_info_by_default(monkeypatch, capsys):
+    monkeypatch.delenv("LOGURU_LEVEL", raising=False)
+    monkeypatch.setattr(cli, "parse_args", lambda: argparse.Namespace(command=None))
+    logger.remove()
+    logger.add(sys.stderr)
+
+    cli.main()
+    logger.debug("per-via detail")
+
+    assert "per-via detail" not in capsys.readouterr().err

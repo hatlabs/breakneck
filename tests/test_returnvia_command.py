@@ -278,8 +278,11 @@ def test_overlay_board_pixels_sit_on_the_raster_and_the_legend_below_it(
     top = front.position.y / NM_PER_MM - height * pixel / 2
     x0, y0, _, y1 = BOARD.bounds
     assert (left, top) == pytest.approx((x0, y0))
-    assert height > GRID.height
-    assert y0 + GRID.height * GRID.pixel >= y1
+    # The board's left column has no copper on F.Cu: its first opaque pixel
+    # is the legend's.
+    full = np.asarray(Image.open(tmp_path / "returnvia-F_Cu.png").convert("RGBA"))
+    first_legend_row = np.nonzero(full[:, 0, 3])[0][0]
+    assert top + first_legend_row * pixel >= y1
 
 
 def test_unserved_end_gets_a_ring_only_on_its_signal_layer(fakes, tmp_path: Path):
@@ -301,6 +304,8 @@ def field_colour(snap, plane, point) -> tuple[int, ...]:
 
 
 ON_TRACK = (SIG[0] - 2, SIG[1])
+# A via end's distance is painted this far past the via's edge.
+PAINTED_PAST_VIA_MM = 0.3
 
 
 def test_track_reads_its_reference_planes_field(fakes, tmp_path: Path):
@@ -361,6 +366,24 @@ def test_two_layer_board_leaves_the_unreferenced_layer_blank(fakes, tmp_path):
     assert at(front, ON_TRACK)[3] == 255
 
 
+def test_track_narrower_than_a_pixel_stays_unbroken(fakes, tmp_path: Path):
+    start, end = (8.0, 2.0), (18.0, 8.5)
+    snap = snapshot(returns=[("GND", (6.0, 5.0))])
+    thin = Track("thin", "X", "F.Cu", GRID.pixel / 4, LineString([start, end]))
+    snap.tracks = [*snap.tracks, thin]
+    fakes.snap = snap
+
+    run(Board(), tmp_path)
+
+    image = rgba(tmp_path / "returnvia-F_Cu.png")
+    steps = np.linspace(0.0, 1.0, 200)
+    along = [
+        (start[0] + t * (end[0] - start[0]), start[1] + t * (end[1] - start[1]))
+        for t in steps
+    ]
+    assert all(at(image, p)[3] == 255 for p in along)
+
+
 def test_every_nets_copper_is_shown(fakes, tmp_path: Path):
     snap = snapshot(returns=[("GND", (6.0, 5.0))])
     gnd_pour, pwr_pour, pad_at = box(12, 0, 20, 4), box(12, 6, 20, 10), (8.0, 8.0)
@@ -392,6 +415,7 @@ def test_every_nets_copper_is_shown(fakes, tmp_path: Path):
 
     image = rgba(tmp_path / "returnvia-F_Cu.png")
     assert at(image, ON_TRACK)[3] == 255
+    assert at(image, (6.0, 5.0))[3] == 255
     assert at(image, pad_at)[3] == 255
     assert at(image, (16.0, 8.0))[3] == 255
     assert at(image, (16.0, 2.0))[3] == 255
@@ -412,9 +436,14 @@ def test_via_end_shows_its_measured_distance_over_its_antipad(fakes, tmp_path):
 
     image = rgba(tmp_path / "returnvia-F_Cu.png")
     (expected,) = palette_at(front_return(fakes.snap))
-    in_antipad = (SIG[0] - ANTIPAD + 0.05, SIG[1])
+    reach = VIA.diameter / 2 + PAINTED_PAST_VIA_MM
+    just_inside = (SIG[0] - reach + GRID.pixel / 2, SIG[1])
+    just_outside = (SIG[0] - reach - GRID.pixel / 2, SIG[1])
+    off_copper = (SIG[0], SIG[1] + reach - GRID.pixel / 2)
     assert at(image, SIG) == expected
-    assert at(image, in_antipad) == expected
+    assert at(image, just_inside) == expected
+    assert at(image, just_outside) != expected
+    assert at(image, off_copper)[3] == 0
 
 
 def test_via_shows_only_on_layers_where_it_has_a_measured_end(fakes, tmp_path):
@@ -505,6 +534,8 @@ def test_layer_outside_every_ground_zone_is_logged_and_counted(fakes, log, tmp_p
     off_copper = (SIG[0], SIG[1] - DISTANCE)
     assert at(rgba(tmp_path / "returnvia-F_Cu.png"), off_copper) == RING
     assert not (rgba(tmp_path / "returnvia-B_Cu.png") == RING).all(axis=2).any()
+    # The F.Cu end has no distance to paint: its copper stays blank.
+    assert at(rgba(tmp_path / "returnvia-F_Cu.png"), SIG)[3] == 0
 
 
 def test_every_via_served_logs_zero_and_draws_no_ring(fakes, log, tmp_path):
@@ -516,6 +547,24 @@ def test_every_via_served_logs_zero_and_draws_no_ring(fakes, log, tmp_path):
     assert any("0 of 1 vias unserved" in m for m in log)
     for name in ("returnvia-F_Cu.png", "returnvia-B_Cu.png"):
         assert not (rgba(tmp_path / name) == RING).all(axis=2).any()
+
+
+def test_exempt_via_alone_on_a_layer_gets_no_map(fakes, tmp_path: Path):
+    snap = snapshot(returns=[("GND", (6.0, 5.0))])
+    lone = (15.0, 5.0)
+    snap.vias = [*snap.vias, via("SIG", lone)]
+    snap.tracks = [
+        *snap.tracks,
+        Track("lone", "SIG", "In1.Cu", 0.2, LineString([lone, (18.0, 5.0)])),
+    ]
+    fakes.snap = snap
+
+    run(Board(), tmp_path)
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "returnvia-B_Cu.png",
+        "returnvia-F_Cu.png",
+    ]
 
 
 def test_exempt_vias_are_counted(fakes, log):
@@ -682,7 +731,11 @@ RAMP_RGB_TOLERANCE = 10
 
 def palette_at(*distances: float) -> list[tuple[int, ...]]:
     dist = np.array([distances])
-    maps = [CoverageMap("signals", "F.Cu", dist, np.zeros(dist.shape, bool))]
+    maps = [
+        CoverageMap(
+            returnvia_command.COPPER_MAP_NET, "F.Cu", dist, np.zeros(dist.shape, bool)
+        )
+    ]
     grid = Grid(0, 0, len(distances), 1)
     rgba = render.overlay_rgba(grid, maps, {}, DISTANCE, STYLE)
     return [tuple(int(v) for v in px) for px in rgba[0]]

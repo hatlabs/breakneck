@@ -125,8 +125,15 @@ def test_legend_text_is_about_the_legend_height(tmp_path: Path):
     light = (strip[..., :3].min(axis=2) > LIGHT_TEXT_MIN).any(axis=1)
     rows = np.nonzero(light)[0]
     runs = np.split(rows, np.nonzero(np.diff(rows) > 1)[0] + 1)
-    text_mm = len(runs[-1]) * grid.pixel
-    assert render.LEGEND_TEXT_MM / 2 <= text_mm <= render.LEGEND_TEXT_MM * 1.5
+    label = runs[-1]
+    text_mm = len(label) * grid.pixel
+    assert text_mm == pytest.approx(render.LEGEND_TEXT_MM, rel=LEGEND_TEXT_TOLERANCE)
+    # The whole label is in the strip, inside its padding.
+    columns = np.nonzero(
+        (strip[label, :, :3].min(axis=2) > LIGHT_TEXT_MIN).any(axis=0)
+    )[0]
+    padding_px = render.LEGEND_PAD_MM / grid.pixel
+    assert columns.max() < strip.shape[1] - padding_px / 2
 
 
 def test_excluded_copper_is_grey_not_pink(tmp_path: Path):
@@ -323,6 +330,7 @@ def test_overlay_draws_rings_only(tmp_path: Path):
 
 # Antialiased white text: well above the legend's dark background.
 LIGHT_TEXT_MIN = 128
+LEGEND_TEXT_TOLERANCE = 0.3
 SCALE = 3.0
 SATURATING_STYLE = render.HeatmapStyle(
     title="Saturating",
