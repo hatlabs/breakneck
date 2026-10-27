@@ -17,7 +17,7 @@ from shapely.ops import unary_union
 
 from breakneck import overlay, render
 from breakneck.placement import RunSettings, measure_only, run_placement
-from breakneck.plan import PlannedUnit
+from breakneck.plan import QUANTISATION, PlannedUnit
 from breakneck.raster import CoverageMap
 from breakneck.returnpath import (
     NoBoardOutlineError,
@@ -37,7 +37,8 @@ from breakneck.snapshot import Snapshot, Via, outline_from_edge_paths, read_edge
 
 COMMAND = "returnvia"
 OVERLAY_COMMIT = "breakneck returnvia overlay"
-# The colour scale runs to this multiple of --distance and saturates beyond.
+# The colour scale runs to this multiple of the served threshold, --distance
+# plus the quantisation margin, and saturates beyond.
 SCALE = 3.0
 SERVED_COLOUR = "#24323f"
 STILL_SERVED_COLOUR = "#6b7d8c"
@@ -49,7 +50,7 @@ RING_COLOUR = "#ff2a6d"
 COPPER_MAP_NET = "copper"
 # Reach past a via's edge over its antipad, the void around it in the plane.
 ANTIPAD_REACH = 0.3
-# Whole steps per --distance, so the step at --distance falls between two.
+# Whole steps per threshold, so the step at the threshold falls between two.
 PALETTE_STEPS_PER_DISTANCE = 256
 THRESHOLD = 1 / SCALE
 _UNSERVED = matplotlib.colormaps[UNSERVED_COLORMAP]
@@ -82,6 +83,7 @@ STYLE = render.HeatmapStyle(
     over_colour=None,
     unreachable_colour=UNREACHABLE_COLOUR,
     scale=SCALE,
+    margin=QUANTISATION,
     ring_colour=RING_COLOUR,
 )
 

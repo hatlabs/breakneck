@@ -54,7 +54,8 @@ class HeatmapStyle:
     """A command's look; `colourbar_label` may use `{distance}`.
 
     `colormap` is a matplotlib colormap or its name. The colour scale runs
-    from 0 to `scale` × the distance. Without an over
+    from 0 to `scale` × (the distance + `margin`), so a margin added to the
+    distance keeps its place on the scale. Without an over
     colour, values above it saturate at its top. Unreachable copper
     (infinite distance) has its own colour. Rings are drawn in
     `ring_colour`, the other markers in `MARKER_COLOUR`.
@@ -67,7 +68,12 @@ class HeatmapStyle:
     over_colour: str | None
     unreachable_colour: str
     scale: float = 1.0
+    margin: float = 0.0
     ring_colour: str = MARKER_COLOUR
+
+    def top(self, distance: float) -> float:
+        """The value at the top of the colour scale."""
+        return self.scale * (distance + self.margin)
 
 
 Disc = tuple[Point2, float]
@@ -109,7 +115,7 @@ def colourbar_extend(
     """
     if style.over_colour is not None:
         return "max"
-    top = style.scale * distance
+    top = style.top(distance)
     beyond = any(
         np.any(np.isfinite(m.distance) & (m.distance > top) & ~m.excluded) for m in maps
     )
@@ -204,7 +210,7 @@ def render_panels(
             np.ma.masked_where(m.excluded | lost | np.isnan(m.distance), m.distance),
             cmap=cmap,
             vmin=0,
-            vmax=style.scale * distance,
+            vmax=style.top(distance),
             extent=extent,
             interpolation="nearest",
         )
@@ -299,7 +305,7 @@ def overlay_rgba(
     shape = maps[0].distance.shape
     rgba = np.zeros((*shape, 4), np.uint8)
     cmap = _colormap(style)
-    norm = matplotlib.colors.Normalize(vmin=0, vmax=style.scale * distance)
+    norm = matplotlib.colors.Normalize(vmin=0, vmax=style.top(distance))
     for m in maps:
         inside = ~np.isnan(m.distance)
         colours = cmap(norm(np.where(inside, m.distance, 0)), bytes=True)
@@ -327,7 +333,7 @@ def legend_rgba(
     )
     cax = fig.add_axes((0, 0, 1, 1))
     scale = matplotlib.cm.ScalarMappable(
-        matplotlib.colors.Normalize(vmin=0, vmax=style.scale * distance),
+        matplotlib.colors.Normalize(vmin=0, vmax=style.top(distance)),
         _colormap(style),
     )
     cb = fig.colorbar(

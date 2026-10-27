@@ -14,7 +14,7 @@ from shapely.ops import unary_union
 from breakneck import cli, drc, overlay, pourstitch_command, render, returnvia_command
 from breakneck.commit import eco2_segment
 from breakneck.placement import RunResult
-from breakneck.plan import Plan, PlannedUnit
+from breakneck.plan import QUANTISATION, Plan, PlannedUnit
 from breakneck.pourstitch import Options
 from breakneck.raster import CoverageMap, Grid
 from breakneck.returnpath import NoBoardOutlineError, ReturnFields, measure_returns
@@ -657,6 +657,8 @@ def test_clear_removes_the_returnvia_overlays(fakes, tmp_path, monkeypatch):
 
 # Off by at most one of the palette's 768 steps, rounded to bytes.
 PALETTE_RGB_TOLERANCE = 2
+# 0.05 mm either side of the threshold, each ramp is a few levels from its end.
+RAMP_RGB_TOLERANCE = 10
 
 
 def palette_at(*distances: float) -> list[tuple[int, ...]]:
@@ -667,8 +669,10 @@ def palette_at(*distances: float) -> list[tuple[int, ...]]:
     return [tuple(int(v) for v in px) for px in rgba[0]]
 
 
-def close_to(px: tuple[int, ...], name: str) -> bool:
-    return all(abs(a - b) <= PALETTE_RGB_TOLERANCE for a, b in zip(px, colour(name)))
+def close_to(
+    px: tuple[int, ...], name: str, tolerance: int = PALETTE_RGB_TOLERANCE
+) -> bool:
+    return all(abs(a - b) <= tolerance for a, b in zip(px, colour(name)))
 
 
 def unserved_colour(fraction: float) -> str:
@@ -676,15 +680,17 @@ def unserved_colour(fraction: float) -> str:
     return render.matplotlib.colors.to_hex(cmap(fraction))
 
 
-def test_palette_steps_from_grey_blue_into_the_unserved_colormap():
-    under, over = palette_at(DISTANCE - 0.01, DISTANCE + 0.01)
+def test_palette_steps_into_the_unserved_colormap_where_served_ends():
+    # A via end is served up to the distance plus the quantisation margin.
+    under, over = palette_at(DISTANCE + 0.05, DISTANCE + 0.15)
 
-    assert close_to(under, returnvia_command.STILL_SERVED_COLOUR)
-    assert close_to(over, unserved_colour(0.0))
+    assert close_to(under, returnvia_command.STILL_SERVED_COLOUR, RAMP_RGB_TOLERANCE)
+    assert close_to(over, unserved_colour(0.0), RAMP_RGB_TOLERANCE)
+    assert not close_to(under, unserved_colour(0.0), RAMP_RGB_TOLERANCE)
 
 
 def test_palette_runs_quiet_then_through_the_unserved_colormap_and_saturates():
-    top = returnvia_command.SCALE * DISTANCE
+    top = returnvia_command.SCALE * (DISTANCE + QUANTISATION)
     served, at_top, beyond = palette_at(0.0, top, 2 * top)
 
     assert close_to(served, returnvia_command.SERVED_COLOUR)
