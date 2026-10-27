@@ -1,5 +1,5 @@
 """The `returnvia` command: plan, verify and commit, then measure, render
-and overlay the return distance on each reference plane."""
+and overlay the return distance under each signal layer's copper."""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ import kipy.board
 import matplotlib.colors
 import numpy as np
 from loguru import logger
+from shapely.geometry.base import BaseGeometry
+from shapely.ops import unary_union
 
 from breakneck import overlay, render
 from breakneck.placement import RunSettings, measure_only, run_placement
@@ -18,10 +20,10 @@ from breakneck.plan import PlannedUnit
 from breakneck.raster import CoverageMap
 from breakneck.returnpath import NoBoardOutlineError, PlaneReturn, ReturnFields
 from breakneck.returnvia import (
-    ReferencePlane,
     ReturnViaOptions,
     ViaReferences,
     plan_return_vias,
+    reference_outlines,
     resolve_ground_nets,
     via_references,
 )
@@ -36,6 +38,7 @@ STILL_SERVED_COLOUR = "#6b7d8c"
 UNSERVED_COLORMAP = "plasma_r"
 UNSERVED_SAMPLES = 64
 UNREACHABLE_COLOUR = "#b44dff"
+SIGNAL_MAP_NET = "signal copper"
 # Whole steps per --distance, so the step at --distance falls between two.
 PALETTE_STEPS_PER_DISTANCE = 256
 THRESHOLD = 1 / SCALE
@@ -56,8 +59,9 @@ PALETTE = matplotlib.colors.LinearSegmentedColormap.from_list(
 )
 STYLE = render.HeatmapStyle(
     title=(
-        "Return vias: distance to the nearest ground return through the "
-        "reference plane; ring = unserved via, yellow to dark blue = beyond the "
+        "Return vias: signal copper coloured by the distance to the nearest "
+        "ground return through its reference plane; ring = unserved via end, "
+        "yellow to dark blue = beyond the "
         "distance, purple = no path to a return"
     ),
     colourbar_label=(
@@ -92,45 +96,68 @@ def with_returns(snapshot: Snapshot, units: Sequence[PlannedUnit]) -> Snapshot:
     return dataclasses.replace(snapshot, vias=(*snapshot.vias, *planned))
 
 
-def plane_maps(
+def signal_copper(
+    snapshot: Snapshot, layer: str, grounds: Sequence[str]
+) -> BaseGeometry:
+    """Tracks, pads and zone fills of the non-ground nets on `layer`."""
+    shapes = [
+        t.geometry for t in snapshot.tracks if t.layer == layer and t.net not in grounds
+    ]
+    shapes += [
+        p.shapes[layer]
+        for p in snapshot.pads
+        if p.net not in grounds and layer in p.shapes
+    ]
+    shapes += [
+        z.fills[layer]
+        for z in snapshot.copper_zones
+        if z.net not in grounds and layer in z.fills
+    ]
+    return unary_union(shapes)
+
+
+def signal_map(fields: ReturnFields, layer: str, grounds: Sequence[str]) -> CoverageMap:
+    """The return field of each pixel's reference plane, on `layer`'s
+    non-ground copper.
+
+    A pixel's reference is chosen as for a via end there. Copper over a void
+    in that plane, or outside every ground outline, has no return path.
+    """
+    grid = fields.grid
+    # Every pixel a track touches, so thin tracks stay unbroken.
+    copper = grid.touching(signal_copper(fields.snapshot, layer, grounds))
+    dist = np.where(copper, np.inf, np.nan)
+    unassigned = copper.copy()
+    for plane, outline in reference_outlines(fields.snapshot, layer, grounds):
+        here = unassigned & grid.mask(outline)
+        on_fill = here & fields.fill(plane)
+        dist[on_fill] = fields.field(plane)[on_fill]
+        unassigned &= ~here
+    return CoverageMap(SIGNAL_MAP_NET, layer, dist, np.zeros(grid.shape, bool))
+
+
+def signal_maps(
     fields: ReturnFields, references: Sequence[ViaReferences], grounds: Sequence[str]
 ) -> list[CoverageMap]:
-    """One map per reference-plane layer, compositing its ground nets' fields.
-
-    A layer's ground fills of different nets don't overlap.
-    """
-    snapshot = fields.snapshot
-    layers = {p.layer for r in references if not r.exempt for p in r.planes}
-    maps = []
-    for layer in (L for L in snapshot.copper_layers if L in layers):
-        planes = [
-            ReferencePlane(layer, g)
-            for g in grounds
-            if not snapshot.fill(g, layer).is_empty
-        ]
-        dist = np.full(fields.grid.shape, np.nan)
-        for p in planes:
-            dist = np.where(fields.fill(p), fields.field(p), dist)
-        maps.append(
-            CoverageMap(
-                ", ".join(p.ground for p in planes),
-                layer,
-                dist,
-                np.zeros(fields.grid.shape, bool),
-            )
-        )
-    return maps
+    """One map per copper layer a non-exempt via end connects on."""
+    layers = {c.layer for r in references if not r.exempt for c in r.layers}
+    return [
+        signal_map(fields, L, grounds)
+        for L in fields.snapshot.copper_layers
+        if L in layers
+    ]
 
 
 def markers(
     results: Sequence[PlaneReturn], maps: Sequence[CoverageMap], distance: float
 ) -> dict[render.MapKey, render.Markers]:
-    """Per plane map: a ring of radius `distance` around each via unserved
-    on that plane, showing the reach its return needs."""
+    """Per signal map: a ring of radius `distance` around each via end
+    unserved on that layer, showing the reach its return needs."""
     rings: dict[str, list[render.Disc]] = {}
     for r in results:
-        if r.plane is not None and not r.served:
-            rings.setdefault(r.plane.layer, []).append((r.position, distance))
+        if not r.served:
+            for layer in r.layers:
+                rings.setdefault(layer, []).append((r.position, distance))
     return {
         (m.net, m.layer): render.Markers(rings=tuple(rings.get(m.layer, ())))
         for m in maps
@@ -206,10 +233,10 @@ def execute(
     logger.info(f"{COMMAND} returns" + (" (check only)" if check else ""))
     log_results(references, results, options.distance)
 
-    maps = plane_maps(fields, references, grounds)
+    maps = signal_maps(fields, references, grounds)
     marks = markers(results, maps, options.distance)
     if not maps:
-        logger.info("No via references a ground plane: no heatmaps")
+        logger.info("No signal via changes layers: no heatmaps")
     elif outputs.render is not None:
         render.render_panels(
             outputs.render,
