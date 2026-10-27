@@ -705,7 +705,7 @@ def through_via(zones=None, ground_nets=GROUNDS):
     snap = snapshot(
         vias=[via("SIG", *SIG_AT)], tracks=[front_track(), back_track()], zones=zones
     )
-    (r,) = via_references(snap, ground_nets)
+    (r,) = via_references(snap, resolve_ground_nets(snap, ground_nets))
     return r
 
 

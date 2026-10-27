@@ -33,6 +33,7 @@ from breakneck.returnvia import (
     OUTSIDE_GROUND,
     ReferencePlane,
     ViaReferences,
+    resolve_ground_nets,
     via_references,
 )
 from breakneck.snapshot import PadKind, Point2, Snapshot
@@ -319,4 +320,5 @@ def measure_returns(
 ) -> list[PlaneReturn]:
     """Return distance of every non-exempt signal via on each reference plane."""
     fields = ReturnFields(snapshot)
-    return fields.measure(via_references(snapshot, ground_nets), distance)
+    grounds = resolve_ground_nets(snapshot, ground_nets)
+    return fields.measure(via_references(snapshot, grounds), distance)

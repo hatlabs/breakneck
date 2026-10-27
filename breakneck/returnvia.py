@@ -108,11 +108,8 @@ class ViaReferences:
         return tuple(dict.fromkeys(c.plane for c in self.layers if c.plane))
 
 
-def via_references(
-    snapshot: Snapshot, ground_nets: Iterable[str] | None
-) -> list[ViaReferences]:
+def via_references(snapshot: Snapshot, grounds: Sequence[str]) -> list[ViaReferences]:
     """Connected layers and their reference planes for every non-ground via."""
-    grounds = resolve_ground_nets(snapshot, ground_nets)
     return [
         ViaReferences(
             v,
