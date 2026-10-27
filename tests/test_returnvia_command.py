@@ -180,14 +180,6 @@ def fakes(monkeypatch):
 
 
 @pytest.fixture
-def log():
-    lines: list[str] = []
-    sink = logger.add(lambda m: lines.append(str(m)), format="{message}")
-    yield lines
-    logger.remove(sink)
-
-
-@pytest.fixture
 def info_log():
     lines: list[str] = []
     sink = logger.add(lambda m: lines.append(str(m)), format="{message}", level="INFO")

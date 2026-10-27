@@ -3,7 +3,6 @@ import sys
 import kipy.board_types
 import pytest
 from kipy.errors import ConnectionError as KiCadConnectionError
-from loguru import logger
 from shapely.geometry import LineString, box
 
 from breakneck import cli
@@ -154,14 +153,6 @@ def kipy_via(via_id):
     v = kipy.board_types.Via()
     v.proto.id.value = via_id
     return v
-
-
-@pytest.fixture
-def log():
-    lines: list[str] = []
-    sink = logger.add(lambda m: lines.append(str(m)), format="{message}")
-    yield lines
-    logger.remove(sink)
 
 
 def clear(monkeypatch, snap, argv, **board_args):
