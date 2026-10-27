@@ -546,7 +546,10 @@ def execute_pourstitch(args):
         overlay_layers=tuple(args.overlay_layers),
     )
     with _exit_on(
-        NoGroundNetsError, breakneck.overlay.OverlayLayersError, *PLACEMENT_ERRORS
+        NoGroundNetsError,
+        pourstitch.OtherClassNetsError,
+        breakneck.overlay.OverlayLayersError,
+        *PLACEMENT_ERRORS,
     ):
         pourstitch_command.execute(
             options,

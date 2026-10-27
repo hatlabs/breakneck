@@ -12,6 +12,7 @@ from breakneck.plan import (
     POURSTITCH_POWER_DISTANCE,
     StitchClass,
 )
+from breakneck.pourstitch import OtherClassNetsError
 from breakneck.returnpath import NoBoardOutlineError
 from breakneck.returnvia import NoGroundNetsError
 from breakneck.snapshot import ViaSize
@@ -248,6 +249,7 @@ def test_pourstitch_takes_ground_nets(monkeypatch):
         placement.SplitError("split"),
         placement.BoardChangedError("changed"),
         NoGroundNetsError("no ground"),
+        OtherClassNetsError("other class"),
     ],
 )
 def test_pourstitch_placement_failure_exits_cleanly(monkeypatch, error):

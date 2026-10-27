@@ -130,22 +130,31 @@ def _ground_nets(snapshot: Snapshot, options: Options) -> set[str]:
         return set()
 
 
+class OtherClassNetsError(ValueError):
+    pass
+
+
 def _class_nets(snapshot: Snapshot, options: Options) -> list[str]:
     """The stitchable nets of the run's class, logged with its distance."""
     wanted = options.stitch_class
+    other, flag = (
+        ("power", "with --power")
+        if wanted is StitchClass.GROUND
+        else ("ground", "without --power")
+    )
     grounds = _ground_nets(snapshot, options)
-    nets = []
+    nets, skipped = [], []
     for n in _stitchable_nets(snapshot, options.nets):
-        is_ground = n in grounds
-        if is_ground == (wanted is StitchClass.GROUND):
+        if (n in grounds) == (wanted is StitchClass.GROUND):
             nets.append(n)
         elif options.nets is not None:
-            other, flag = (
-                ("ground", "without --power")
-                if is_ground
-                else ("power", "with --power")
-            )
-            logger.warning(f"Net {n} is a {other} net; skipping (stitch it {flag})")
+            skipped.append(n)
+    if skipped and not nets:
+        raise OtherClassNetsError(
+            f"--nets lists only {other} nets ({', '.join(skipped)}); run {flag}"
+        )
+    for n in skipped:
+        logger.warning(f"Net {n} is a {other} net; skipping (stitch it {flag})")
     logger.info(
         f"pourstitch: {wanted.value} nets with pours on two or more layers, "
         f"stitched at {options.max_distance:g} mm: " + (", ".join(nets) or "none")

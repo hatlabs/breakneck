@@ -18,6 +18,7 @@ from breakneck.plan import (
 from breakneck.pourstitch import (
     QUANTISATION,
     Options,
+    OtherClassNetsError,
     PourStitcher,
     lattice_sites,
     summarise,
@@ -578,6 +579,18 @@ def test_listed_net_of_the_other_class_is_skipped_with_a_warning(
     assert skipped not in {u.net for u in plan.units}
     (warning,) = [m for m in log if f"Net {skipped} " in m and "skipping" in m]
     assert hint in warning
+
+
+@pytest.mark.parametrize(
+    ("opts", "hint"),
+    [
+        (ground(nets=(POWER_NET,)), r"\+3\.3V.*run with --power"),
+        (power(nets=(NET,)), "GND.*run without --power"),
+    ],
+)
+def test_listed_nets_all_of_the_other_class_are_an_error(opts, hint):
+    with pytest.raises(OtherClassNetsError, match=hint):
+        PourStitcher()(ground_and_power_snapshot(), opts, [])
 
 
 def test_ground_nets_override_detection():
