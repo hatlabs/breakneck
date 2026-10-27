@@ -254,30 +254,38 @@ def _reference_plane(
     )
 
 
-def _connected_layers(snapshot: Snapshot, v: Via) -> list[str]:
-    """Layers where same-net copper (track, pad or fill) touches the via."""
-    centre = Point(v.position)
-    radius = v.diameter / 2
+def _touches(v: Via, geometry: BaseGeometry, reach: float = 0.0) -> bool:
+    return (
+        not geometry.is_empty
+        and geometry.distance(Point(v.position))
+        <= v.diameter / 2 + reach + DISTANCE_EPSILON
+    )
 
-    def touches(geometry: BaseGeometry, reach: float = 0.0) -> bool:
-        return (
-            not geometry.is_empty
-            and geometry.distance(centre) <= radius + reach + DISTANCE_EPSILON
-        )
 
+def tied_layers(snapshot: Snapshot, v: Via) -> set[str]:
+    """Layers where a same-net track or pad touches the via."""
     layers = {
         t.layer
         for t in snapshot.tracks
-        if t.net == v.net and touches(t.centreline, t.width / 2)
+        if t.net == v.net and _touches(v, t.centreline, t.width / 2)
     }
-    layers |= {
+    return layers | {
         L
         for p in snapshot.pads
         if p.net == v.net
         for L, shape in p.shapes.items()
-        if touches(shape)
+        if _touches(v, shape)
     }
-    layers |= {L for L in snapshot.copper_layers if touches(snapshot.fill(v.net, L))}
+
+
+def filled_layers(snapshot: Snapshot, v: Via) -> set[str]:
+    """Layers where a fill of the via's own net touches it."""
+    return {L for L in snapshot.copper_layers if _touches(v, snapshot.fill(v.net, L))}
+
+
+def _connected_layers(snapshot: Snapshot, v: Via) -> list[str]:
+    """Layers where same-net copper (track, pad or fill) touches the via."""
+    layers = tied_layers(snapshot, v) | filled_layers(snapshot, v)
     return [L for L in snapshot.copper_layers if L in layers]
 
 
