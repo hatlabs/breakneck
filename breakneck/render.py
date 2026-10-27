@@ -17,10 +17,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 from matplotlib.patches import Circle
-from scipy import ndimage
 
 from breakneck.overlay import OVERLAY_PPI, OVERLAY_TAG
-from breakneck.raster import BoolMap, CoverageMap, Grid
+from breakneck.raster import CoverageMap, Grid
 from breakneck.snapshot import Point2, Snapshot
 
 BACKGROUND = "#101010"
@@ -28,9 +27,6 @@ OUTLINE_COLOUR = "#888888"
 UNFIXABLE_COLOUR = "cyan"
 MARKER_COLOUR = "white"
 RING_LINE_WIDTH = 0.8
-CONTOUR_LINE_WIDTH = 0.8
-# A served pixel is on the overlay contour when an edge neighbour is not.
-CONTOUR_NEIGHBOURS = ndimage.generate_binary_structure(2, 1)
 CROSS_SIZE = 5
 CROSS_LINE_WIDTH = 1.2
 # Two pixels, so a ring stays visible on the board zoomed out.
@@ -44,18 +40,11 @@ MARGIN_MM = 0.5
 
 
 @dataclass(frozen=True)
-class Contour:
-    """A line at `margin` beyond the distance, between copper on either side."""
-
-    colour: str
-    margin: float = 0.0
-
-
-@dataclass(frozen=True)
 class HeatmapStyle:
     """A command's look; `colourbar_label` may use `{distance}`.
 
-    The colour scale runs from 0 to `scale` × the distance. Without an over
+    `colormap` is a matplotlib colormap or its name. The colour scale runs
+    from 0 to `scale` × the distance. Without an over
     colour, values above it saturate at its top. Unreachable copper
     (infinite distance) has its own colour.
     """
@@ -63,11 +52,10 @@ class HeatmapStyle:
     title: str
     colourbar_label: str
     png_prefix: str
-    colormap: str
+    colormap: str | matplotlib.colors.Colormap
     over_colour: str | None
     unreachable_colour: str
     scale: float = 1.0
-    contour: Contour | None = None
 
 
 Disc = tuple[Point2, float]
@@ -114,12 +102,6 @@ def colourbar_extend(
         np.any(np.isfinite(m.distance) & (m.distance > top) & ~m.excluded) for m in maps
     )
     return "max" if beyond else "neither"
-
-
-def _contour_pixels(m: CoverageMap, level: float) -> BoolMap:
-    """Copper within `level` with an edge neighbour beyond it."""
-    served = (m.distance <= level) & ~m.excluded
-    return served & ndimage.binary_dilation(m.uncovered(level), CONTOUR_NEIGHBOURS)
 
 
 def _rgba_bytes(colour: str) -> npt.NDArray[np.uint8]:
@@ -214,15 +196,6 @@ def render_panels(
             extent=extent,
             interpolation="nearest",
         )
-        if style.contour is not None:
-            ax.contour(
-                grid.xs,
-                grid.ys,
-                np.ma.masked_where(~np.isfinite(m.distance) | m.excluded, m.distance),
-                levels=[distance + style.contour.margin],
-                colors=[style.contour.colour],
-                linewidths=CONTOUR_LINE_WIDTH,
-            )
         ax.imshow(
             np.ma.masked_where(~lost, lost),
             cmap=unreachable,
@@ -313,9 +286,6 @@ def overlay_rgba(
         rgba[inside] = colours[inside]
         rgba[np.isinf(m.distance)] = _rgba_bytes(style.unreachable_colour)
         rgba[m.excluded] = _rgba_bytes(EXCLUDED_COLOUR)
-        if style.contour is not None:
-            level = distance + style.contour.margin
-            rgba[_contour_pixels(m, level)] = _rgba_bytes(style.contour.colour)
     rings = {r for m in maps for r in markers.get((m.net, m.layer), NO_MARKERS).rings}
     for centre, radius in rings:
         _draw_ring(rgba, grid, centre, radius)

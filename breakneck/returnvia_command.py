@@ -8,12 +8,13 @@ from collections.abc import Sequence
 
 import kipy
 import kipy.board
+import matplotlib.colors
 import numpy as np
 from loguru import logger
 
 from breakneck import overlay, render
 from breakneck.placement import RunSettings, measure_only, run_placement
-from breakneck.plan import QUANTISATION, PlannedUnit
+from breakneck.plan import PlannedUnit
 from breakneck.raster import CoverageMap
 from breakneck.returnpath import NoBoardOutlineError, PlaneReturn, ReturnFields
 from breakneck.returnvia import (
@@ -30,26 +31,44 @@ COMMAND = "returnvia"
 OVERLAY_COMMIT = "breakneck returnvia overlay"
 # The colour scale runs to this multiple of --distance and saturates beyond.
 SCALE = 3.0
-CONTOUR_COLOUR = "#ff2a6d"
+SERVED_COLOUR = "#24323f"
+STILL_SERVED_COLOUR = "#6b7d8c"
+UNSERVED_COLORMAP = "plasma_r"
+UNSERVED_SAMPLES = 64
 UNREACHABLE_COLOUR = "#b44dff"
-# Reversed, so far copper is dark and the white rings of unserved vias,
-# which sit in it, stand out.
+# Whole steps per --distance, so the step at --distance falls between two.
+PALETTE_STEPS_PER_DISTANCE = 256
+THRESHOLD = 1 / SCALE
+_UNSERVED = matplotlib.colormaps[UNSERVED_COLORMAP]
+# Quiet up to --distance, then a hard step into plasma: served copper recedes
+# and the distance beyond it reads with its full contrast.
+PALETTE = matplotlib.colors.LinearSegmentedColormap.from_list(
+    "returnvia",
+    [
+        (0.0, SERVED_COLOUR),
+        (THRESHOLD, STILL_SERVED_COLOUR),
+        *(
+            (THRESHOLD + (1 - THRESHOLD) * p, _UNSERVED(p))
+            for p in np.linspace(0.0, 1.0, UNSERVED_SAMPLES)
+        ),
+    ],
+    N=round(SCALE * PALETTE_STEPS_PER_DISTANCE),
+)
 STYLE = render.HeatmapStyle(
     title=(
         "Return vias: distance to the nearest ground return through the "
-        "reference plane; ring = unserved via, pink line = served threshold, "
-        "purple = no path to a return"
+        "reference plane; ring = unserved via, yellow to dark blue = beyond the "
+        "distance, purple = no path to a return"
     ),
     colourbar_label=(
         "distance to nearest return through the plane (mm); "
         "served within {distance:g} mm"
     ),
     png_prefix="returnvia",
-    colormap="cividis_r",
+    colormap=PALETTE,
     over_colour=None,
     unreachable_colour=UNREACHABLE_COLOUR,
     scale=SCALE,
-    contour=render.Contour(CONTOUR_COLOUR, QUANTISATION),
 )
 
 

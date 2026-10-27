@@ -1,5 +1,4 @@
 import argparse
-import math
 from itertools import pairwise
 from pathlib import Path
 
@@ -15,9 +14,9 @@ from shapely.ops import unary_union
 from breakneck import cli, drc, overlay, pourstitch_command, render, returnvia_command
 from breakneck.commit import eco2_segment
 from breakneck.placement import RunResult
-from breakneck.plan import QUANTISATION, Plan, PlannedUnit
+from breakneck.plan import Plan, PlannedUnit
 from breakneck.pourstitch import Options
-from breakneck.raster import Grid
+from breakneck.raster import CoverageMap, Grid
 from breakneck.returnpath import NoBoardOutlineError
 from breakneck.returnvia import NoGroundNetsError, ReturnViaOptions
 from breakneck.snapshot import Snapshot, Track, Via, ViaSize, Zone
@@ -37,9 +36,9 @@ WHITE = (255, 255, 255, 255)
 # The panels' axes frames are the only black in a --render figure.
 FRAME_MAX_RGB_SUM = 20
 MIN_FRAME_PX = 100
-# A ring is an antialiased hairline, a little dimmer than white and a pixel
-# either side of where it is drawn; the scale's bright end is much further off.
-NEAR_WHITE_RGB_DIFF = 120
+# A ring is an antialiased white hairline, a pixel either side of where it is
+# drawn: it lifts every channel, which no colour of the scale has this high.
+RING_MIN_CHANNEL = 130
 RING_REACH_PX = 1
 
 
@@ -228,15 +227,15 @@ def panel_frames(path: Path) -> tuple[np.ndarray, list[tuple[slice, slice]]]:
     return image, sorted(frames, key=lambda f: f[1].start)
 
 
-def white_near(image: np.ndarray, frame: tuple[slice, slice], point) -> bool:
-    """Whether a panel shows near-white at board `point`."""
+def ring_near(image: np.ndarray, frame: tuple[slice, slice], point) -> bool:
+    """Whether a panel shows a ring at board `point`."""
     x0, y0, x1, _ = BOARD.bounds
     px_per_mm = (frame[1].stop - frame[1].start) / (x1 - x0 + 2 * render.MARGIN_MM)
     r = frame[0].start + round((point[1] - y0 + render.MARGIN_MM) * px_per_mm)
     c = frame[1].start + round((point[0] - x0 + render.MARGIN_MM) * px_per_mm)
     k = RING_REACH_PX
-    near = image[r - k : r + k + 1, c - k : c + k + 1] - np.array(WHITE[:3])
-    return bool((np.abs(near).sum(axis=2) < NEAR_WHITE_RGB_DIFF).any())
+    near = image[r - k : r + k + 1, c - k : c + k + 1]
+    return bool((near.min(axis=2) >= RING_MIN_CHANNEL).any())
 
 
 def test_check_overlay_images_only_the_reference_planes(fakes, tmp_path: Path):
@@ -505,24 +504,41 @@ def test_clear_removes_the_returnvia_overlays(fakes, tmp_path, monkeypatch):
     assert board.removed == fakes.created
 
 
-def test_image_shows_the_threshold_contour_and_saturates(fakes, tmp_path: Path):
-    ret = (4.0, 5.0)
-    fakes.snap = snapshot(returns=[("GND", ret)])
+# Off by at most one of the palette's 768 steps, rounded to bytes.
+PALETTE_RGB_TOLERANCE = 2
 
-    run(Board(), tmp_path)
 
-    image = rgba(tmp_path / "returnvia-In2_Cu.png")
-    contour = colour(STYLE.contour.colour)  # type: ignore[union-attr]
-    row = GRID.index(ret)[0]
-    xs = [GRID.xs[c] for c in range(GRID.width) if tuple(image[row, c]) == contour]
-    threshold = DISTANCE + QUANTISATION
-    # East of the return the path runs around SIG's antipad; west it is straight.
-    west = [x for x in xs if x < ret[0]]
-    assert west and all(
-        math.isclose(ret[0] - x, threshold, abs_tol=2 * GRID.pixel) for x in west
-    )
-    far = (ret[0] + returnvia_command.SCALE * DISTANCE + 2.0, 2.0)
-    assert at(image, far) == scale_colour(1.0)
+def palette_at(*distances: float) -> list[tuple[int, ...]]:
+    dist = np.array([distances])
+    maps = [CoverageMap("signals", "F.Cu", dist, np.zeros(dist.shape, bool))]
+    grid = Grid(0, 0, len(distances), 1)
+    rgba = render.overlay_rgba(grid, maps, {}, DISTANCE, STYLE)
+    return [tuple(int(v) for v in px) for px in rgba[0]]
+
+
+def close_to(px: tuple[int, ...], name: str) -> bool:
+    return all(abs(a - b) <= PALETTE_RGB_TOLERANCE for a, b in zip(px, colour(name)))
+
+
+def unserved_colour(fraction: float) -> str:
+    cmap = render.plt.get_cmap(returnvia_command.UNSERVED_COLORMAP)
+    return render.matplotlib.colors.to_hex(cmap(fraction))
+
+
+def test_palette_steps_from_grey_blue_into_the_unserved_colormap():
+    under, over = palette_at(DISTANCE - 0.01, DISTANCE + 0.01)
+
+    assert close_to(under, returnvia_command.STILL_SERVED_COLOUR)
+    assert close_to(over, unserved_colour(0.0))
+
+
+def test_palette_runs_quiet_then_through_the_unserved_colormap_and_saturates():
+    top = returnvia_command.SCALE * DISTANCE
+    served, at_top, beyond = palette_at(0.0, top, 2 * top)
+
+    assert close_to(served, returnvia_command.SERVED_COLOUR)
+    assert close_to(at_top, unserved_colour(1.0))
+    assert beyond == at_top
 
 
 def test_board_without_outline_fails_before_the_refill(fakes, tmp_path):
@@ -577,8 +593,8 @@ def test_render_panels_ring_the_unserved_end_on_its_plane(fakes, tmp_path):
 
     image, (in1, in2) = panel_frames(tmp_path / "heat.png")
     on_ring = (SIG[0] - DISTANCE, SIG[1])
-    assert white_near(image, in1, on_ring)
-    assert not white_near(image, in2, on_ring)
+    assert ring_near(image, in1, on_ring)
+    assert not ring_near(image, in2, on_ring)
 
 
 def test_no_ground_fill_end_is_logged_and_ringed(fakes, log, tmp_path: Path):
