@@ -32,7 +32,7 @@ The ground nets are the nets with zones on two or more inner layers. A board wit
 
 With Manhattan routing, outer-layer pours break up into narrow fingers. A regular grid of stitching vias misses many of them, and an unstitched finger connected at one end can act as an antenna.
 
-`pourstitch --nets ... --distance D` makes every point of each listed net's pours lie within D (default 2.5 mm) of a stitching via, measuring distance through the copper rather than in a straight line. A finger whose tip is 2 mm from a via across a gap, but 8 mm away along the copper, counts as 8 mm.
+`pourstitch --distance D` makes every point of each net's pours lie within D (default 2.5 mm) of a stitching via, measuring distance through the copper rather than in a straight line. A finger whose tip is 2 mm from a via across a gap, but 8 mm away along the copper, counts as 8 mm. By default it stitches every net with pours on two or more copper layers; a net whose zones are all on one layer has nothing to stitch and is skipped. `--nets GND +3.3V` limits it to the listed nets.
 
 It rasterises the pours at 0.1 mm, places vias on a square lattice of pitch D·√2, then fills the remaining gaps one at a time, starting with the point farthest from any via. Narrow spots get a smaller fallback via. `--render` and `--overlay` show the result as heatmaps (see below).
 
@@ -94,7 +94,7 @@ Run `breakneck -h`, or `breakneck <command> -h`, to see the available options.
 ```bash
 breakneck returnvia
 breakneck padvia
-breakneck pourstitch --nets GND GND_ISO +3.3V +5V_ISO --overlay
+breakneck pourstitch --overlay
 ```
 
 Each placement run:
