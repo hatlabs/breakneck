@@ -123,18 +123,23 @@ Notes:
 
 ### Dry runs
 
-`breakneck --dry-run <command>` plans, runs DRC, logs what it would place and writes `--render` output, but commits no vias or markers. The zone refill before planning still runs, and `pourstitch --overlay` still places its images.
+`breakneck --dry-run <command>` plans, runs DRC, logs what it would place and writes `--render` output, but commits no vias or markers. The zone refill before planning still runs, and `--overlay` still places its images.
 
 ### Heatmaps
 
 `pourstitch --render PATH` writes a figure with one panel per net and layer, coloured by distance to the nearest stitching via, measured through the copper. Points beyond `--distance` are pink. Copper that no via could ever bring within `--distance` is grey: it is farther than that, through the net's copper on its layer, from every spot where a via could join the net's fill on two or more layers. Typical grey copper is a local zone on one layer whose other side is another net's pour, or the far end of such a zone joined to the main pour by a long neck. Other-net clearances are ignored for this, so a spot blocked only by other copper shows pink, not grey. Grey areas are left out of the uncovered area that `pourstitch` logs and are reported separately.
 
-`pourstitch --overlay [DIR]` writes one transparent PNG per copper layer to DIR (default: the current directory) and places it on the board as a reference image, scaled and positioned to line up with the copper. The images go on User.1–User.4, one per copper layer in stack order, or on the layers given with `--overlay-layers`. Those layers must be enabled in Board Setup → Board Editor Layers. Toggle a layer's visibility to show or hide its heatmap, and remove them with `breakneck clear`. Both `clear` and a new `--overlay` replace only breakneck's own overlays, recognised by a `breakneck` text chunk in the PNG, also after the board outline has changed. Other reference images on those layers stay. Overlays placed by earlier breakneck versions carry no tag and are recognised only at their position and scale for the current board outline; after an outline change, delete those by hand.
+`returnvia --render PATH` writes one panel per copper layer on which a via changing layers connects. The layer's copper is shown: every net's tracks, pads and pours, ground pours included, since a via placed anywhere in it would need its own return, and the ground vias. Other vias show only on layers where they have a measured end. Each pixel is coloured by the distance through its reference plane to the nearest ground return. The reference plane is the nearest other copper layer in stack order with a ground zone outline at that pixel, the same rule a via end uses. A via end shows its own measured return distance over the via and 0.3 mm past it, its antipad. Copper within the served threshold, `--distance` plus a 0.1 mm measuring margin, is dark grey-blue, lightening towards the threshold. Beyond it the colour steps to yellow and runs through matplotlib's `plasma_r` to dark blue at 3 × the threshold, and stays there farther out. Purple copper has no path to a return: it lies over a slot or void in its reference plane. Copper with no ground outline on any other layer has no reference plane and is left blank, such as a two-layer board's ground side. A pink ring of radius `--distance` marks each unserved via end on its own layer. Identical layers share a panel.
 
-`pourstitch --check` measures the existing stitching only: no planning, no DRC and no vias. Combine it with `--overlay` or `--render` to see the current coverage:
+`returnvia` logs the number of exempt vias, which connect on fewer than two layers, and how many vias and via-plane returns are unserved. Set `LOGURU_LEVEL=DEBUG` to list each unserved via end with its distance or the reason it can't be served.
+
+`pourstitch --overlay [DIR]` and `returnvia --overlay [DIR]` write one transparent PNG per copper layer to DIR (default: the current directory) and place it on the board as a reference image, scaled and positioned to line up with the copper. The images go on User.1–User.4, one per copper layer in stack order, or on the layers given with `--overlay-layers`. Those layers must be enabled in Board Setup → Board Editor Layers. Each PNG carries its colourbar and label in a strip below the board outline. Toggle a layer's visibility to show or hide its heatmap, and remove them with `breakneck clear`. Both `clear` and a new `--overlay` replace only breakneck's own overlays, recognised by a `breakneck` text chunk in the PNG, also after the board outline has changed. Other reference images on those layers stay. Overlays placed by earlier breakneck versions carry no tag and are recognised only at their position and scale for the current board outline; after an outline change, delete those by hand.
+
+`pourstitch --check` and `returnvia --check` measure the existing vias only: no planning, no DRC and no vias. Combine them with `--overlay` or `--render` to see the current coverage:
 
 ```bash
 breakneck pourstitch --nets GND +3.3V --check --overlay
+breakneck returnvia --check --render returnvia.png
 ```
 
 ### Visualising return vias

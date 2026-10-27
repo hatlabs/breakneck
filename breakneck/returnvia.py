@@ -10,7 +10,7 @@ reports the distance through each reference plane (see `returnpath`).
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 
 from loguru import logger
@@ -214,31 +214,44 @@ def via_references(
     ]
 
 
-def _reference_plane(
-    snapshot: Snapshot, position: Point2, layer: str, grounds: Sequence[str]
-) -> ReferencePlane | None:
-    """Nearest other layer in stack order with a ground outline at `position`.
+def reference_outlines(
+    snapshot: Snapshot, layer: str, grounds: Sequence[str]
+) -> Iterator[tuple[ReferencePlane, BaseGeometry]]:
+    """Ground zone outlines that can be `layer`'s reference, in precedence order.
 
-    Equidistant layers resolve to the upper one; overlapping outlines on the
-    plane resolve to the highest zone priority, as in `ground_net_at`.
+    The nearest other layer in stack order comes first, the upper one of two
+    equidistant layers, then on a layer the highest zone priority.
     """
     stack = snapshot.copper_layers
     i = stack.index(layer)
-    pt = Point(position)
     for step in range(1, len(stack)):
         for j in (i - step, i + step):
             if not 0 <= j < len(stack):
                 continue
-            hits = [
+            zones = [
                 z
                 for z in snapshot.copper_zones
-                if z.net in grounds and stack[j] in z.layers and z.outline.contains(pt)
+                if z.net in grounds and stack[j] in z.layers
             ]
-            if hits:
-                plane = max(hits, key=lambda z: z.priority)
-                assert plane.net is not None
-                return ReferencePlane(stack[j], plane.net)
-    return None
+            for z in sorted(zones, key=lambda z: -z.priority):
+                assert z.net is not None
+                yield ReferencePlane(stack[j], z.net), z.outline
+
+
+def _reference_plane(
+    snapshot: Snapshot, position: Point2, layer: str, grounds: Sequence[str]
+) -> ReferencePlane | None:
+    """The first reference outline containing `position`, as `ground_net_at`
+    resolves overlapping outlines by zone priority."""
+    pt = Point(position)
+    return next(
+        (
+            plane
+            for plane, outline in reference_outlines(snapshot, layer, grounds)
+            if outline.contains(pt)
+        ),
+        None,
+    )
 
 
 def _connected_layers(snapshot: Snapshot, v: Via) -> list[str]:

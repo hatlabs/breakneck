@@ -1,5 +1,4 @@
 import argparse
-import math
 from itertools import pairwise
 from pathlib import Path
 
@@ -17,10 +16,19 @@ from breakneck.commit import eco2_segment
 from breakneck.placement import RunResult
 from breakneck.plan import QUANTISATION, Plan, PlannedUnit
 from breakneck.pourstitch import Options
-from breakneck.raster import Grid
-from breakneck.returnpath import NoBoardOutlineError
-from breakneck.returnvia import NoGroundNetsError, ReturnViaOptions
-from breakneck.snapshot import Snapshot, Track, Via, ViaSize, Zone
+from breakneck.raster import CoverageMap, Grid
+from breakneck.returnpath import NoBoardOutlineError, ReturnFields, measure_returns
+from breakneck.returnvia import NoGroundNetsError, ReferencePlane, ReturnViaOptions
+from breakneck.snapshot import (
+    NM_PER_MM,
+    Pad,
+    PadKind,
+    Snapshot,
+    Track,
+    Via,
+    ViaSize,
+    Zone,
+)
 
 FOUR_LAYERS = ("F.Cu", "In1.Cu", "In2.Cu", "B.Cu")
 INNER = ("In1.Cu", "In2.Cu")
@@ -33,13 +41,15 @@ ANTIPAD = 0.5
 VIA = ViaSize(0.6, 0.3)
 OPTIONS = ReturnViaOptions(distance=DISTANCE)
 STYLE = returnvia_command.STYLE
-WHITE = (255, 255, 255, 255)
+RING = (0xFF, 0x2A, 0x6D, 0xFF)
 # The panels' axes frames are the only black in a --render figure.
 FRAME_MAX_RGB_SUM = 20
 MIN_FRAME_PX = 100
-# A ring is an antialiased hairline, a little dimmer than white and a pixel
-# either side of where it is drawn; the scale's bright end is much further off.
-NEAR_WHITE_RGB_DIFF = 120
+# Off copper, a ring is an antialiased pink hairline over the near-black
+# background, a pixel either side of where it is drawn: red well above the
+# background and above green and blue.
+RING_MIN_RED = 100
+RING_RED_OVER_GREEN = 50
 RING_REACH_PX = 1
 
 
@@ -177,6 +187,14 @@ def log():
     logger.remove(sink)
 
 
+@pytest.fixture
+def info_log():
+    lines: list[str] = []
+    sink = logger.add(lambda m: lines.append(str(m)), format="{message}", level="INFO")
+    yield lines
+    logger.remove(sink)
+
+
 def run(board, tmp_path=None, check=True, dry_run=False, **outputs):
     if tmp_path is not None:
         outputs.setdefault("overlay_dir", tmp_path)
@@ -190,17 +208,12 @@ def run(board, tmp_path=None, check=True, dry_run=False, **outputs):
 
 
 def rgba(path: Path) -> np.ndarray:
-    return np.asarray(Image.open(path).convert("RGBA"))
+    """An overlay's board pixels, without the legend."""
+    return np.asarray(Image.open(path).convert("RGBA"))[: GRID.height, : GRID.width]
 
 
 def at(image: np.ndarray, point) -> tuple[int, ...]:
     return tuple(int(v) for v in image[GRID.index(point)])
-
-
-def scale_colour(fraction: float) -> tuple[int, ...]:
-    return tuple(
-        int(v) for v in render.plt.get_cmap(STYLE.colormap)(fraction, bytes=True)
-    )
 
 
 def colour(name: str) -> tuple[int, ...]:
@@ -220,18 +233,19 @@ def panel_frames(path: Path) -> tuple[np.ndarray, list[tuple[slice, slice]]]:
     return image, sorted(frames, key=lambda f: f[1].start)
 
 
-def white_near(image: np.ndarray, frame: tuple[slice, slice], point) -> bool:
-    """Whether a panel shows near-white at board `point`."""
+def ring_near(image: np.ndarray, frame: tuple[slice, slice], point) -> bool:
+    """Whether a panel shows a ring at board `point`."""
     x0, y0, x1, _ = BOARD.bounds
     px_per_mm = (frame[1].stop - frame[1].start) / (x1 - x0 + 2 * render.MARGIN_MM)
     r = frame[0].start + round((point[1] - y0 + render.MARGIN_MM) * px_per_mm)
     c = frame[1].start + round((point[0] - x0 + render.MARGIN_MM) * px_per_mm)
     k = RING_REACH_PX
-    near = image[r - k : r + k + 1, c - k : c + k + 1] - np.array(WHITE[:3])
-    return bool((np.abs(near).sum(axis=2) < NEAR_WHITE_RGB_DIFF).any())
+    near = image[r - k : r + k + 1, c - k : c + k + 1]
+    red, green = near[..., 0], near[..., 1]
+    return bool(((red >= RING_MIN_RED) & (red - green >= RING_RED_OVER_GREEN)).any())
 
 
-def test_check_overlay_images_only_the_reference_planes(fakes, tmp_path: Path):
+def test_check_overlay_images_only_the_via_ends_signal_layers(fakes, tmp_path):
     fakes.snap = snapshot(returns=[("GND", (6.0, 5.0))])
     board = Board()
 
@@ -244,20 +258,226 @@ def test_check_overlay_images_only_the_reference_planes(fakes, tmp_path: Path):
         ("push_commit", returnvia_command.OVERLAY_COMMIT),
     ]
     assert sorted(p.name for p in tmp_path.iterdir()) == [
-        "returnvia-In1_Cu.png",
-        "returnvia-In2_Cu.png",
+        "returnvia-B_Cu.png",
+        "returnvia-F_Cu.png",
     ]
-    assert sorted(i.layer for i in fakes.created) == [BL.BL_User_2, BL.BL_User_3]
+    assert sorted(i.layer for i in fakes.created) == [BL.BL_User_1, BL.BL_User_4]
 
 
-def test_unserved_end_gets_a_ring_only_on_its_plane(fakes, tmp_path: Path):
+def test_overlay_board_pixels_sit_on_the_raster_and_the_legend_below_it(
+    fakes, tmp_path: Path
+):
+    fakes.snap = snapshot(returns=[("GND", (6.0, 5.0))])
+
+    run(Board(), tmp_path)
+
+    front = next(i for i in fakes.created if i.layer == BL.BL_User_1)
+    width, height = Image.open(tmp_path / "returnvia-F_Cu.png").size
+    pixel = overlay.MM_PER_INCH / overlay.OVERLAY_PPI * front.image_scale
+    left = front.position.x / NM_PER_MM - width * pixel / 2
+    top = front.position.y / NM_PER_MM - height * pixel / 2
+    x0, y0, _, y1 = BOARD.bounds
+    assert (left, top) == pytest.approx((x0, y0))
+    # The board's left column has no copper on F.Cu: its first opaque pixel
+    # is the legend's.
+    full = np.asarray(Image.open(tmp_path / "returnvia-F_Cu.png").convert("RGBA"))
+    first_legend_row = np.nonzero(full[:, 0, 3])[0][0]
+    assert top + first_legend_row * pixel >= y1
+
+
+def test_unserved_end_gets_a_ring_only_on_its_signal_layer(fakes, tmp_path: Path):
+    # In1's slot leaves the F.Cu end unserved; the B.Cu end references In2.
     fakes.snap = slotted((SIG[0] + 1.4, SIG[1]))
 
     run(Board(), tmp_path)
 
-    on_ring = (SIG[0] - DISTANCE, SIG[1])
-    assert at(rgba(tmp_path / "returnvia-In1_Cu.png"), on_ring) == WHITE
-    assert at(rgba(tmp_path / "returnvia-In2_Cu.png"), on_ring) != WHITE
+    off_copper = (SIG[0], SIG[1] - DISTANCE)
+    assert at(rgba(tmp_path / "returnvia-F_Cu.png"), off_copper) == RING
+    assert at(rgba(tmp_path / "returnvia-B_Cu.png"), off_copper)[3] == 0
+
+
+def field_colour(snap, plane, point) -> tuple[int, ...]:
+    """Colour of `plane`'s return field at `point`."""
+    fields = ReturnFields(snap)
+    (expected,) = palette_at(float(fields.field(plane)[GRID.index(point)]))
+    return expected
+
+
+ON_TRACK = (SIG[0] - 2, SIG[1])
+# A via end's distance is painted this far past the via's edge.
+PAINTED_PAST_VIA_MM = 0.3
+
+
+def test_track_reads_its_reference_planes_field(fakes, tmp_path: Path):
+    ret = (SIG[0] + 1.4, SIG[1])
+    fakes.snap = slotted(ret)
+
+    run(Board(), tmp_path)
+
+    front = at(rgba(tmp_path / "returnvia-F_Cu.png"), ON_TRACK)
+    back = at(rgba(tmp_path / "returnvia-B_Cu.png"), ON_TRACK)
+    assert front == field_colour(fakes.snap, ReferencePlane("In1.Cu", "GND"), ON_TRACK)
+    assert back == field_colour(fakes.snap, ReferencePlane("In2.Cu", "GND"), ON_TRACK)
+    assert front != back
+
+
+def test_track_over_a_slot_in_its_plane_is_unreachable(fakes, tmp_path: Path):
+    flush = BOARD.difference(antipads(SIG))
+    slot = Point(ON_TRACK).buffer(0.5)
+    zones = [gnd_zone({"In1.Cu": flush.difference(slot), "In2.Cu": flush})]
+    fakes.snap = snapshot(returns=[("GND", (6.0, 5.0))], zones=zones)
+
+    run(Board(), tmp_path)
+
+    unreachable = colour(STYLE.unreachable_colour)
+    assert at(rgba(tmp_path / "returnvia-F_Cu.png"), ON_TRACK) == unreachable
+    assert at(rgba(tmp_path / "returnvia-B_Cu.png"), ON_TRACK) != unreachable
+
+
+def test_track_outside_every_ground_outline_is_blank(fakes, tmp_path: Path):
+    right = box(4, 0, 20, 10)
+    fills = right.difference(antipads(SIG))
+    zones = [gnd_zone({L: fills for L in INNER}, outline=right)]
+    fakes.snap = snapshot(returns=[("GND", (6.0, 5.0))], zones=zones)
+
+    run(Board(), tmp_path)
+
+    image = rgba(tmp_path / "returnvia-F_Cu.png")
+    assert at(image, ON_TRACK)[3] == 0
+    assert at(image, (4.3, SIG[1]))[3] == 255
+    assert at(image, (4.3, SIG[1])) != colour(STYLE.unreachable_colour)
+
+
+def test_two_layer_board_leaves_the_unreferenced_layer_blank(fakes, tmp_path):
+    # GND pours only B.Cu: F.Cu references it, B.Cu has no reference layer.
+    pour = BOARD.difference(antipads(SIG))
+    snap = snapshot(returns=[("GND", (4.0, 5.0))], zones=[gnd_zone({"B.Cu": pour})])
+    snap.copper_layers = ("F.Cu", "B.Cu")
+    fakes.snap = snap
+
+    run(Board(), tmp_path)
+
+    back = rgba(tmp_path / "returnvia-B_Cu.png")
+    assert at(back, (15.0, 8.0))[3] == 0
+    assert at(back, ON_TRACK)[3] == 0
+    assert at(back, (SIG[0], SIG[1] - DISTANCE)) == RING
+    front = rgba(tmp_path / "returnvia-F_Cu.png")
+    assert at(front, ON_TRACK) != colour(STYLE.unreachable_colour)
+    assert at(front, ON_TRACK)[3] == 255
+
+
+def test_track_narrower_than_a_pixel_stays_unbroken(fakes, tmp_path: Path):
+    start, end = (8.0, 2.0), (18.0, 8.5)
+    snap = snapshot(returns=[("GND", (6.0, 5.0))])
+    thin = Track("thin", "X", "F.Cu", GRID.pixel / 4, LineString([start, end]))
+    snap.tracks = [*snap.tracks, thin]
+    fakes.snap = snap
+
+    run(Board(), tmp_path)
+
+    image = rgba(tmp_path / "returnvia-F_Cu.png")
+    steps = np.linspace(0.0, 1.0, 200)
+    along = [
+        (start[0] + t * (end[0] - start[0]), start[1] + t * (end[1] - start[1]))
+        for t in steps
+    ]
+    assert all(at(image, p)[3] == 255 for p in along)
+
+
+def test_ground_via_in_its_clearance_reads_its_own_return(fakes, tmp_path):
+    # The return sits in a clearance hole in both planes, bridged by thermal
+    # spokes: its own copper is the return, not a void.
+    ret = (6.0, 5.0)
+    plain = BOARD.difference(antipads(SIG, ret))
+    fakes.snap = snapshot(
+        returns=[("GND", ret)], zones=[gnd_zone({L: plain for L in INNER})]
+    )
+
+    run(Board(), tmp_path)
+
+    image = rgba(tmp_path / "returnvia-F_Cu.png")
+    assert at(image, ret) == palette_at(0.0)[0]
+
+
+def test_every_nets_copper_is_shown(fakes, tmp_path: Path):
+    snap = snapshot(returns=[("GND", (6.0, 5.0))])
+    gnd_pour, pwr_pour, pad_at = box(12, 0, 20, 4), box(12, 6, 20, 10), (8.0, 8.0)
+    pad = Pad(
+        "p",
+        None,
+        "X",
+        PadKind.SMD,
+        "1",
+        pad_at,
+        0.0,
+        {"F.Cu": Point(pad_at).buffer(0.5)},
+    )
+    fakes.snap = Snapshot(
+        copper_layers=FOUR_LAYERS,
+        vias=snap.vias,
+        tracks=snap.tracks,
+        pads=[pad],
+        zones=[
+            *snap.zones,
+            gnd_zone({"F.Cu": gnd_pour}, outline=gnd_pour),
+            gnd_zone({"F.Cu": pwr_pour}, net="PWR", outline=pwr_pour),
+        ],
+        edge_paths=snap.edge_paths,
+        via_sizes=snap.via_sizes,
+    )
+
+    run(Board(), tmp_path)
+
+    image = rgba(tmp_path / "returnvia-F_Cu.png")
+    assert at(image, ON_TRACK)[3] == 255
+    assert at(image, (6.0, 5.0))[3] == 255
+    assert at(image, pad_at)[3] == 255
+    assert at(image, (16.0, 8.0))[3] == 255
+    assert at(image, (16.0, 2.0))[3] == 255
+    assert at(image, (8.0, 2.0))[3] == 0
+
+
+def front_return(snap) -> float:
+    (front,) = [
+        r for r in measure_returns(snap, None, DISTANCE) if r.layers == ("F.Cu",)
+    ]
+    return front.distance
+
+
+def test_via_end_shows_its_measured_distance_over_its_antipad(fakes, tmp_path):
+    fakes.snap = snapshot(returns=[("GND", (6.0, 5.0))])
+
+    run(Board(), tmp_path)
+
+    image = rgba(tmp_path / "returnvia-F_Cu.png")
+    (expected,) = palette_at(front_return(fakes.snap))
+    reach = VIA.diameter / 2 + PAINTED_PAST_VIA_MM
+    just_inside = (SIG[0] - reach + GRID.pixel / 2, SIG[1])
+    just_outside = (SIG[0] - reach - GRID.pixel / 2, SIG[1])
+    off_copper = (SIG[0], SIG[1] + reach - GRID.pixel / 2)
+    assert at(image, SIG) == expected
+    assert at(image, just_inside) == expected
+    assert at(image, just_outside) != expected
+    assert at(image, off_copper)[3] == 0
+
+
+def test_via_shows_only_on_layers_where_it_has_a_measured_end(fakes, tmp_path):
+    # SIG2 connects on F.Cu and In2.Cu; it passes B.Cu without copper there.
+    sig2 = (15.0, 5.0)
+    snap = snapshot(signals=(SIG, sig2), returns=[("GND", (6.0, 5.0))])
+    snap.tracks = [
+        t
+        for t in snap.tracks
+        if not (t.net == "SIG" and t.layer == "B.Cu" and t.centreline.coords[0] == sig2)
+    ]
+    snap.tracks.append(
+        Track("SIG2:In2", "SIG", "In2.Cu", 0.2, LineString([sig2, (18.0, 5.0)]))
+    )
+    fakes.snap = snap
+
+    run(Board(), tmp_path)
+
+    assert at(rgba(tmp_path / "returnvia-B_Cu.png"), sig2)[3] == 0
 
 
 def test_check_logs_each_unserved_via_plane_and_commits_nothing(fakes, log):
@@ -273,6 +493,32 @@ def test_check_logs_each_unserved_via_plane_and_commits_nothing(fakes, log):
     distance = float(line.rsplit(":", 1)[1].split()[0])
     assert distance > 2 * DISTANCE
     assert any("1 of 1 vias unserved" in m and "1 of 2 via-plane" in m for m in log)
+
+
+def test_unserved_lines_are_debug_and_the_summary_info(fakes, log, info_log):
+    fakes.snap = slotted((SIG[0] + 1.4, SIG[1]))
+    fakes.snap.vias = [*fakes.snap.vias, via("SIG", (15.0, 5.0))]
+
+    run(Board())
+
+    assert [m for m in log if "unserved:" in m]
+    assert not [m for m in info_log if "unserved:" in m]
+    assert any("1 vias exempt" in m for m in info_log)
+    assert any("1 of 1 vias unserved" in m for m in info_log)
+
+
+def test_no_ground_fill_line_is_debug(fakes, log, info_log):
+    far = box(15, 0, 20, 10)
+    flush = BOARD.difference(antipads(SIG))
+    fakes.snap = snapshot(
+        returns=[("GND", (6.0, 5.0))],
+        zones=[gnd_zone({"In1.Cu": far, "In2.Cu": flush})],
+    )
+
+    run(Board())
+
+    assert [m for m in log if "no GND fill at the via" in m]
+    assert not [m for m in info_log if "no GND fill at the via" in m]
 
 
 def test_via_with_no_path_to_a_return_logs_an_infinite_distance(fakes, log):
@@ -299,9 +545,12 @@ def test_layer_outside_every_ground_zone_is_logged_and_counted(fakes, log, tmp_p
     (line,) = [m for m in log if "unserved:" in m]
     assert line.rstrip().endswith("outside every ground zone for F.Cu")
     assert any("1 of 1 vias unserved" in m for m in log)
-    # No image to draw the F.Cu end's ring on; F.Cu itself is served.
-    assert [p.name for p in tmp_path.iterdir()] == ["returnvia-F_Cu.png"]
-    assert not (rgba(tmp_path / "returnvia-F_Cu.png") == WHITE).all(axis=2).any()
+    # Only the F.Cu end is unserved: B.Cu references F.Cu's ground.
+    off_copper = (SIG[0], SIG[1] - DISTANCE)
+    assert at(rgba(tmp_path / "returnvia-F_Cu.png"), off_copper) == RING
+    assert not (rgba(tmp_path / "returnvia-B_Cu.png") == RING).all(axis=2).any()
+    # The F.Cu end has no distance to paint: its copper stays blank.
+    assert at(rgba(tmp_path / "returnvia-F_Cu.png"), SIG)[3] == 0
 
 
 def test_every_via_served_logs_zero_and_draws_no_ring(fakes, log, tmp_path):
@@ -311,8 +560,26 @@ def test_every_via_served_logs_zero_and_draws_no_ring(fakes, log, tmp_path):
 
     assert not [m for m in log if "unserved:" in m]
     assert any("0 of 1 vias unserved" in m for m in log)
-    for name in ("returnvia-In1_Cu.png", "returnvia-In2_Cu.png"):
-        assert not (rgba(tmp_path / name) == WHITE).all(axis=2).any()
+    for name in ("returnvia-F_Cu.png", "returnvia-B_Cu.png"):
+        assert not (rgba(tmp_path / name) == RING).all(axis=2).any()
+
+
+def test_exempt_via_alone_on_a_layer_gets_no_map(fakes, tmp_path: Path):
+    snap = snapshot(returns=[("GND", (6.0, 5.0))])
+    lone = (15.0, 5.0)
+    snap.vias = [*snap.vias, via("SIG", lone)]
+    snap.tracks = [
+        *snap.tracks,
+        Track("lone", "SIG", "In1.Cu", 0.2, LineString([lone, (18.0, 5.0)])),
+    ]
+    fakes.snap = snap
+
+    run(Board(), tmp_path)
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "returnvia-B_Cu.png",
+        "returnvia-F_Cu.png",
+    ]
 
 
 def test_exempt_vias_are_counted(fakes, log):
@@ -346,11 +613,10 @@ def test_split_plane_composites_both_ground_nets(fakes, tmp_path: Path):
         kicad=KiCad(Board()),  # type: ignore[arg-type]
     )
 
-    image = rgba(tmp_path / "returnvia-In1_Cu.png")
-    near = scale_colour(0.0)
-    assert at(image, (6.0, 5.0)) == near
-    assert at(image, iso_ret) == near
-    assert at(image, (10.15, 5.0))[3] == 0
+    image = rgba(tmp_path / "returnvia-F_Cu.png")
+    for point, net in ((ON_TRACK, "GND"), ((iso_sig[0] - 2, 5.0), "GND_ISO")):
+        plane = ReferencePlane("In1.Cu", net)
+        assert at(image, point) == field_colour(fakes.snap, plane, point)
 
 
 def test_no_reference_plane_removes_the_previous_set(fakes, tmp_path: Path):
@@ -412,11 +678,12 @@ def test_dry_run_overlay_shows_the_planned_vias(fakes, log, tmp_path: Path):
     ]
     assert any("0 of 1 vias unserved" in m for m in log)
     assert fakes.created
-    image = rgba(tmp_path / "returnvia-In1_Cu.png")
+    image = rgba(tmp_path / "returnvia-F_Cu.png")
     # Without the planned via no copper reaches a return at all.
     unreachable = colour(STYLE.unreachable_colour)
-    assert at(image, (1.0, 1.0)) != unreachable
-    assert not (image == WHITE).all(axis=2).any()
+    assert at(image, ON_TRACK)[3] == 255
+    assert at(image, ON_TRACK) != unreachable
+    assert not (image == RING).all(axis=2).any()
 
 
 def test_forced_vias_serve_nothing(fakes, log):
@@ -471,24 +738,51 @@ def test_clear_removes_the_returnvia_overlays(fakes, tmp_path, monkeypatch):
     assert board.removed == fakes.created
 
 
-def test_image_shows_the_threshold_contour_and_saturates(fakes, tmp_path: Path):
-    ret = (4.0, 5.0)
-    fakes.snap = snapshot(returns=[("GND", ret)])
+# Off by at most one of the palette's 768 steps, rounded to bytes.
+PALETTE_RGB_TOLERANCE = 2
+# 0.05 mm either side of the threshold, each ramp is a few levels from its end.
+RAMP_RGB_TOLERANCE = 10
 
-    run(Board(), tmp_path)
 
-    image = rgba(tmp_path / "returnvia-In2_Cu.png")
-    contour = colour(STYLE.contour.colour)  # type: ignore[union-attr]
-    row = GRID.index(ret)[0]
-    xs = [GRID.xs[c] for c in range(GRID.width) if tuple(image[row, c]) == contour]
-    threshold = DISTANCE + QUANTISATION
-    # East of the return the path runs around SIG's antipad; west it is straight.
-    west = [x for x in xs if x < ret[0]]
-    assert west and all(
-        math.isclose(ret[0] - x, threshold, abs_tol=2 * GRID.pixel) for x in west
-    )
-    far = (ret[0] + returnvia_command.SCALE * DISTANCE + 2.0, 2.0)
-    assert at(image, far) == scale_colour(1.0)
+def palette_at(*distances: float) -> list[tuple[int, ...]]:
+    dist = np.array([distances])
+    maps = [
+        CoverageMap(
+            returnvia_command.COPPER_MAP_NET, "F.Cu", dist, np.zeros(dist.shape, bool)
+        )
+    ]
+    grid = Grid(0, 0, len(distances), 1)
+    rgba = render.overlay_rgba(grid, maps, {}, DISTANCE, STYLE)
+    return [tuple(int(v) for v in px) for px in rgba[0]]
+
+
+def close_to(
+    px: tuple[int, ...], name: str, tolerance: int = PALETTE_RGB_TOLERANCE
+) -> bool:
+    return all(abs(a - b) <= tolerance for a, b in zip(px, colour(name)))
+
+
+def unserved_colour(fraction: float) -> str:
+    cmap = render.plt.get_cmap(returnvia_command.UNSERVED_COLORMAP)
+    return render.matplotlib.colors.to_hex(cmap(fraction))
+
+
+def test_palette_steps_into_the_unserved_colormap_where_served_ends():
+    # A via end is served up to the distance plus the quantisation margin.
+    under, over = palette_at(DISTANCE + 0.05, DISTANCE + 0.15)
+
+    assert close_to(under, returnvia_command.STILL_SERVED_COLOUR, RAMP_RGB_TOLERANCE)
+    assert close_to(over, unserved_colour(0.0), RAMP_RGB_TOLERANCE)
+    assert not close_to(under, unserved_colour(0.0), RAMP_RGB_TOLERANCE)
+
+
+def test_palette_runs_quiet_then_through_the_unserved_colormap_and_saturates():
+    top = returnvia_command.SCALE * (DISTANCE + QUANTISATION)
+    served, at_top, beyond = palette_at(0.0, top, 2 * top)
+
+    assert close_to(served, returnvia_command.SERVED_COLOUR)
+    assert close_to(at_top, unserved_colour(1.0))
+    assert beyond == at_top
 
 
 def test_board_without_outline_fails_before_the_refill(fakes, tmp_path):
@@ -536,15 +830,15 @@ def test_render_writes_the_panels(fakes, tmp_path):
     assert board.calls == ["refill_zones"]
 
 
-def test_render_panels_ring_the_unserved_end_on_its_plane(fakes, tmp_path):
+def test_render_panels_ring_the_unserved_end_on_its_layer(fakes, tmp_path):
     fakes.snap = slotted((SIG[0] + 1.4, SIG[1]))
 
     run(Board(), render=tmp_path / "heat.png")
 
-    image, (in1, in2) = panel_frames(tmp_path / "heat.png")
-    on_ring = (SIG[0] - DISTANCE, SIG[1])
-    assert white_near(image, in1, on_ring)
-    assert not white_near(image, in2, on_ring)
+    image, (front, back) = panel_frames(tmp_path / "heat.png")
+    off_copper = (SIG[0], SIG[1] - DISTANCE)
+    assert ring_near(image, front, off_copper)
+    assert not ring_near(image, back, off_copper)
 
 
 def test_no_ground_fill_end_is_logged_and_ringed(fakes, log, tmp_path: Path):
@@ -562,9 +856,9 @@ def test_no_ground_fill_end_is_logged_and_ringed(fakes, log, tmp_path: Path):
     assert line.rstrip().endswith(
         "SIG at (5.000, 5.000): no GND fill at the via on In1.Cu"
     )
-    on_ring = (SIG[0] - DISTANCE, SIG[1])
-    assert at(rgba(tmp_path / "returnvia-In1_Cu.png"), on_ring) == WHITE
-    assert at(rgba(tmp_path / "returnvia-In2_Cu.png"), on_ring) != WHITE
+    off_copper = (SIG[0], SIG[1] - DISTANCE)
+    assert at(rgba(tmp_path / "returnvia-F_Cu.png"), off_copper) == RING
+    assert at(rgba(tmp_path / "returnvia-B_Cu.png"), off_copper) != RING
 
 
 def test_render_creates_the_missing_parent_directory(fakes, tmp_path: Path):

@@ -3,6 +3,7 @@ from itertools import pairwise
 from pathlib import Path
 
 import pytest
+from kipy.geometry import Vector2
 from kipy.proto.board.board_types_pb2 import BoardLayer as BL
 from loguru import logger
 from shapely.geometry import box
@@ -11,7 +12,7 @@ from breakneck import cli, drc, overlay, pourstitch_command
 from breakneck.commit import eco2_segment
 from breakneck.placement import RunResult, RunSettings
 from breakneck.pourstitch import Options
-from breakneck.snapshot import Snapshot, ViaSize, Zone
+from breakneck.snapshot import NM_PER_MM, Snapshot, ViaSize, Zone
 
 LAYERS = ("F.Cu", "B.Cu")
 POUR = box(0, 0, 10, 10)
@@ -279,14 +280,17 @@ class ClearBoard(Board):
 def test_clear_removes_the_overlays_pourstitch_placed(
     fakes, tmp_path: Path, monkeypatch, tagged
 ):
-    # Untagged, as earlier builds placed them, only the placement matches.
+    # Earlier builds placed them untagged, without a legend, at the board
+    # placement: only that placement matches.
     created, _ = fakes
     outputs = overlay.Outputs(overlay_dir=tmp_path)
     pourstitch_command.execute(OPTIONS, outputs, check=True, kicad=KiCad(Board()))  # type: ignore[arg-type]
     assert created
     if not tagged:
+        x, y = overlay.board_placement(POUR.bounds).centre
         for image in created:
             image.image_data = b""
+            image.position = Vector2.from_xy(round(x * NM_PER_MM), round(y * NM_PER_MM))
     board = ClearBoard(list(created))
     monkeypatch.setattr(cli.kipy, "KiCad", lambda: KiCad(board))
 

@@ -34,6 +34,7 @@ OVERLAY_TAG = ("breakneck", "pourstitch-overlay")
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 PNG_CHUNK_HEADER = struct.Struct(">I4s")
 PNG_CRC_SIZE = 4
+PNG_IHDR_SIZE = struct.Struct(">II")
 # Untagged overlays from earlier builds are recognised by their placement:
 # an image within these of it is taken as breakneck's.
 POSITION_TOLERANCE_NM = 1000
@@ -168,6 +169,13 @@ def png_text(data: bytes) -> dict[str, str]:
     return out
 
 
+def png_size(data: bytes) -> tuple[int, int]:
+    """(width, height) from a PNG's header chunk, which comes first."""
+    at = len(PNG_SIGNATURE) + PNG_CHUNK_HEADER.size
+    width, height = PNG_IHDR_SIZE.unpack_from(data, at)
+    return width, height
+
+
 def is_overlay(
     image: kipy.board_types.ReferenceImage,
     placement: ImagePlacement,
@@ -250,10 +258,24 @@ def show_overlays(
     commit_label: str,
 ) -> None:
     """Place the per-copper-layer PNGs as this run's overlay set, or log
-    where they would go."""
+    where they would go.
+
+    Each PNG's pixel (0, 0) goes at the board raster's origin; a PNG larger
+    than the raster, as with a legend below it, extends right and down.
+    """
     layers = layer_map(snapshot.copper_layers, outputs.overlay_layers)
-    placement = board_placement(snapshot.board_outline.bounds)
-    images = [OverlayImage(L, layers[L], path, placement) for L, path in pngs.items()]
+    bounds = snapshot.board_outline.bounds
+    origin = (bounds[0], bounds[1])
+    images = [
+        OverlayImage(
+            L,
+            layers[L],
+            path,
+            image_placement(origin, png_size(path.read_bytes()), POURSTITCH_PIXEL),
+        )
+        for L, path in pngs.items()
+    ]
+    placement = board_placement(bounds)
     if place:
         place_overlays(board, images, placement, outputs.overlay_layers, commit_label)
     else:

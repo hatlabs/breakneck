@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -11,16 +12,18 @@ import matplotlib
 
 matplotlib.use("Agg")
 
+import matplotlib.cm
 import matplotlib.colors
 import matplotlib.image
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 from matplotlib.patches import Circle
-from scipy import ndimage
+from matplotlib.transforms import Bbox
+from PIL import Image
 
-from breakneck.overlay import OVERLAY_PPI, OVERLAY_TAG
-from breakneck.raster import BoolMap, CoverageMap, Grid
+from breakneck.overlay import MM_PER_INCH, OVERLAY_PPI, OVERLAY_TAG
+from breakneck.raster import CoverageMap, Grid
 from breakneck.snapshot import Point2, Snapshot
 
 BACKGROUND = "#101010"
@@ -28,9 +31,6 @@ OUTLINE_COLOUR = "#888888"
 UNFIXABLE_COLOUR = "cyan"
 MARKER_COLOUR = "white"
 RING_LINE_WIDTH = 0.8
-CONTOUR_LINE_WIDTH = 0.8
-# A served pixel is on the overlay contour when an edge neighbour is not.
-CONTOUR_NEIGHBOURS = ndimage.generate_binary_structure(2, 1)
 CROSS_SIZE = 5
 CROSS_LINE_WIDTH = 1.2
 # Two pixels, so a ring stays visible on the board zoomed out.
@@ -41,33 +41,39 @@ PANEL_COLUMNS = 2
 PANEL_INCHES = 8
 PANEL_DPI = 100
 MARGIN_MM = 0.5
-
-
-@dataclass(frozen=True)
-class Contour:
-    """A line at `margin` beyond the distance, between copper on either side."""
-
-    colour: str
-    margin: float = 0.0
+POINTS_PER_INCH = 72
+# The overlay legend, in board mm at the overlay's 0.1 mm pixel.
+LEGEND_TEXT_MM = 1.5
+LEGEND_BAR_WIDTH_MM = 40.0
+LEGEND_BAR_HEIGHT_MM = 2.0
+LEGEND_PAD_MM = 1.0
 
 
 @dataclass(frozen=True)
 class HeatmapStyle:
     """A command's look; `colourbar_label` may use `{distance}`.
 
-    The colour scale runs from 0 to `scale` × the distance. Without an over
+    `colormap` is a matplotlib colormap or its name. The colour scale runs
+    from 0 to `scale` × (the distance + `margin`), so a margin added to the
+    distance keeps its place on the scale. Without an over
     colour, values above it saturate at its top. Unreachable copper
-    (infinite distance) has its own colour.
+    (infinite distance) has its own colour. Rings are drawn in
+    `ring_colour`, the other markers in `MARKER_COLOUR`.
     """
 
     title: str
     colourbar_label: str
     png_prefix: str
-    colormap: str
+    colormap: str | matplotlib.colors.Colormap
     over_colour: str | None
     unreachable_colour: str
     scale: float = 1.0
-    contour: Contour | None = None
+    margin: float = 0.0
+    ring_colour: str = MARKER_COLOUR
+
+    def top(self, distance: float) -> float:
+        """The value at the top of the colour scale."""
+        return self.scale * (distance + self.margin)
 
 
 Disc = tuple[Point2, float]
@@ -109,17 +115,11 @@ def colourbar_extend(
     """
     if style.over_colour is not None:
         return "max"
-    top = style.scale * distance
+    top = style.top(distance)
     beyond = any(
         np.any(np.isfinite(m.distance) & (m.distance > top) & ~m.excluded) for m in maps
     )
     return "max" if beyond else "neither"
-
-
-def _contour_pixels(m: CoverageMap, level: float) -> BoolMap:
-    """Copper within `level` with an edge neighbour beyond it."""
-    served = (m.distance <= level) & ~m.excluded
-    return served & ndimage.binary_dilation(m.uncovered(level), CONTOUR_NEIGHBOURS)
 
 
 def _rgba_bytes(colour: str) -> npt.NDArray[np.uint8]:
@@ -210,19 +210,10 @@ def render_panels(
             np.ma.masked_where(m.excluded | lost | np.isnan(m.distance), m.distance),
             cmap=cmap,
             vmin=0,
-            vmax=style.scale * distance,
+            vmax=style.top(distance),
             extent=extent,
             interpolation="nearest",
         )
-        if style.contour is not None:
-            ax.contour(
-                grid.xs,
-                grid.ys,
-                np.ma.masked_where(~np.isfinite(m.distance) | m.excluded, m.distance),
-                levels=[distance + style.contour.margin],
-                colors=[style.contour.colour],
-                linewidths=CONTOUR_LINE_WIDTH,
-            )
         ax.imshow(
             np.ma.masked_where(~lost, lost),
             cmap=unreachable,
@@ -239,7 +230,11 @@ def render_panels(
         for centre, radius in marks.rings:
             ax.add_patch(
                 Circle(
-                    centre, radius, fill=False, color=MARKER_COLOUR, lw=RING_LINE_WIDTH
+                    centre,
+                    radius,
+                    fill=False,
+                    color=style.ring_colour,
+                    lw=RING_LINE_WIDTH,
                 )
             )
         for centre, radius in marks.dots:
@@ -280,14 +275,18 @@ def render_panels(
 
 
 def _draw_ring(
-    rgba: npt.NDArray[np.uint8], grid: Grid, centre: Point2, radius: float
+    rgba: npt.NDArray[np.uint8],
+    grid: Grid,
+    centre: Point2,
+    radius: float,
+    colour: str,
 ) -> None:
     half = OVERLAY_RING_WIDTH_MM / 2
     rs, cs = grid.window(grid.index(centre), radius + half)
     dx = grid.xs[cs][np.newaxis, :] - centre[0]
     dy = grid.ys[rs][:, np.newaxis] - centre[1]
     on = np.abs(np.hypot(dx, dy) - radius) <= half
-    rgba[rs, cs][on] = _rgba_bytes(MARKER_COLOUR)
+    rgba[rs, cs][on] = _rgba_bytes(colour)
 
 
 def overlay_rgba(
@@ -306,20 +305,78 @@ def overlay_rgba(
     shape = maps[0].distance.shape
     rgba = np.zeros((*shape, 4), np.uint8)
     cmap = _colormap(style)
-    norm = matplotlib.colors.Normalize(vmin=0, vmax=style.scale * distance)
+    norm = matplotlib.colors.Normalize(vmin=0, vmax=style.top(distance))
     for m in maps:
         inside = ~np.isnan(m.distance)
         colours = cmap(norm(np.where(inside, m.distance, 0)), bytes=True)
         rgba[inside] = colours[inside]
         rgba[np.isinf(m.distance)] = _rgba_bytes(style.unreachable_colour)
         rgba[m.excluded] = _rgba_bytes(EXCLUDED_COLOUR)
-        if style.contour is not None:
-            level = distance + style.contour.margin
-            rgba[_contour_pixels(m, level)] = _rgba_bytes(style.contour.colour)
     rings = {r for m in maps for r in markers.get((m.net, m.layer), NO_MARKERS).rings}
     for centre, radius in rings:
-        _draw_ring(rgba, grid, centre, radius)
+        _draw_ring(rgba, grid, centre, radius, style.ring_colour)
     return rgba
+
+
+def _inches(mm: float) -> float:
+    return mm / MM_PER_INCH
+
+
+def legend_rgba(
+    maps: Sequence[CoverageMap], distance: float, style: HeatmapStyle
+) -> npt.NDArray[np.uint8]:
+    """The colourbar and its label, white on the figure background, drawn at
+    the overlay resolution so its text reads at `LEGEND_TEXT_MM` on the board."""
+    fig = plt.figure(
+        figsize=(_inches(LEGEND_BAR_WIDTH_MM), _inches(LEGEND_BAR_HEIGHT_MM)),
+        dpi=OVERLAY_PPI,
+    )
+    cax = fig.add_axes((0, 0, 1, 1))
+    scale = matplotlib.cm.ScalarMappable(
+        matplotlib.colors.Normalize(vmin=0, vmax=style.top(distance)),
+        _colormap(style),
+    )
+    cb = fig.colorbar(
+        scale,
+        cax=cax,
+        orientation="horizontal",
+        extend=colourbar_extend(maps, distance, style),
+    )
+    font = _inches(LEGEND_TEXT_MM) * POINTS_PER_INCH
+    cb.set_label(
+        style.colourbar_label.format(distance=distance),
+        color="white",
+        size=font,
+        loc="left",
+    )
+    cb.ax.tick_params(colors="white", labelsize=font)
+    # The tight bounding box cuts a label wider than the bar off at the
+    # figure's edge, so the saved area adds the label's own extent.
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()  # type: ignore[attr-defined]
+    label = cb.ax.xaxis.label.get_window_extent(renderer)
+    saved = Bbox.union(
+        [fig.get_tightbbox(renderer), label.transformed(fig.dpi_scale_trans.inverted())]
+    ).padded(_inches(LEGEND_PAD_MM))
+    buf = io.BytesIO()
+    fig.savefig(
+        buf, format="png", dpi=OVERLAY_PPI, facecolor=BACKGROUND, bbox_inches=saved
+    )
+    plt.close(fig)
+    buf.seek(0)
+    return np.asarray(Image.open(buf).convert("RGBA"))
+
+
+def with_legend(
+    board: npt.NDArray[np.uint8], legend: npt.NDArray[np.uint8]
+) -> npt.NDArray[np.uint8]:
+    """The board pixels at the top left, the legend below them, transparent
+    elsewhere: pixel (0, 0) stays at the raster origin."""
+    height, width = board.shape[:2]
+    out = np.zeros((height + legend.shape[0], max(width, legend.shape[1]), 4), np.uint8)
+    out[:height, :width] = board
+    out[height:, : legend.shape[1]] = legend
+    return out
 
 
 def write_overlays(
@@ -330,8 +387,10 @@ def write_overlays(
     distance: float,
     style: HeatmapStyle,
 ) -> dict[str, Path]:
-    """One overlay PNG per copper layer that has maps."""
+    """One overlay PNG per copper layer that has maps, each with the legend
+    below the board."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    legend = legend_rgba(maps, distance, style)
     by_layer: dict[str, list[CoverageMap]] = {}
     for m in maps:
         by_layer.setdefault(m.layer, []).append(m)
@@ -340,7 +399,9 @@ def write_overlays(
         path = out_dir / f"{style.png_prefix}-{layer.replace('.', '_')}.png"
         matplotlib.image.imsave(
             path,
-            overlay_rgba(grid, layer_maps, markers, distance, style),
+            with_legend(
+                overlay_rgba(grid, layer_maps, markers, distance, style), legend
+            ),
             dpi=OVERLAY_PPI,
             metadata=dict([OVERLAY_TAG]),
         )

@@ -10,7 +10,7 @@ from kipy.proto.board.board_types_pb2 import BoardLayer as BL
 from PIL import Image
 from shapely.geometry import box
 
-from breakneck import cli, overlay, pourstitch_command, render
+from breakneck import cli, overlay, pourstitch_command, render, returnvia_command
 from breakneck.commit import CreateItemsError
 from breakneck.plan import Plan, PlannedUnit, UnfixableSpot
 from breakneck.raster import CoverageMap, Grid
@@ -76,7 +76,7 @@ def maps_for(layer_nets: dict[str, list[tuple[str, np.ndarray]]]) -> list[Covera
     ]
 
 
-def test_overlay_image_has_raster_size_and_transparent_background(tmp_path: Path):
+def test_overlay_board_area_has_raster_size_and_transparent_background(tmp_path):
     a = np.full((30, 50), np.nan)
     a[:, :20] = 1.0
     b = np.full((30, 50), np.nan)
@@ -86,13 +86,54 @@ def test_overlay_image_has_raster_size_and_transparent_background(tmp_path: Path
     paths = render.write_overlays(tmp_path, grid_of(maps), maps, {}, D, STYLE)
 
     img = Image.open(paths["F.Cu"])
-    assert img.size == (50, 30)
     assert img.info["dpi"] == pytest.approx((overlay.OVERLAY_PPI,) * 2, abs=0.01)
-    rgba = np.asarray(img.convert("RGBA"))
+    rgba = np.asarray(img.convert("RGBA"))[:30, :50]
     assert (rgba[:, 20:30, 3] == 0).all()
     assert (rgba[:, :20, 3] == 255).all()
     assert (rgba[:, 30:, 3] == 255).all()
     assert tuple(rgba[0, 40, :3]) == (0xFF, 0x2A, 0x6D)
+
+
+@pytest.mark.parametrize("style", [STYLE, returnvia_command.STYLE])
+def test_overlay_keeps_the_board_pixels_and_adds_a_legend_below(tmp_path, style):
+    dist = ramp(50, height=30)
+    dist[:, 40:] = np.nan
+    maps = [coverage("GND", "F.Cu", dist)]
+    grid = grid_of(maps)
+
+    path = render.write_overlays(tmp_path, grid, maps, {}, D, style)["F.Cu"]
+
+    rgba = np.asarray(Image.open(path).convert("RGBA"))
+    board = render.overlay_rgba(grid, maps, {}, D, style)
+    assert (rgba[: grid.height, : grid.width] == board).all()
+    assert (rgba[: grid.height, grid.width :, 3] == 0).all()
+    strip = rgba[grid.height :]
+    assert strip.shape[0] > 0
+    white = (strip[..., :3] == 255).all(axis=2)
+    assert white.any()
+    assert (strip[..., 3] == 255).any()
+
+
+def test_legend_text_is_about_the_legend_height(tmp_path: Path):
+    maps = [coverage("GND", "F.Cu", np.zeros((10, 10)))]
+    grid = grid_of(maps)
+
+    path = render.write_overlays(tmp_path, grid, maps, {}, D, STYLE)["F.Cu"]
+
+    strip = np.asarray(Image.open(path).convert("RGBA"))[grid.height :]
+    # Rows of the label text: the lowest run of rows with light pixels.
+    light = (strip[..., :3].min(axis=2) > LIGHT_TEXT_MIN).any(axis=1)
+    rows = np.nonzero(light)[0]
+    runs = np.split(rows, np.nonzero(np.diff(rows) > 1)[0] + 1)
+    label = runs[-1]
+    text_mm = len(label) * grid.pixel
+    assert text_mm == pytest.approx(render.LEGEND_TEXT_MM, rel=LEGEND_TEXT_TOLERANCE)
+    # The whole label is in the strip, inside its padding.
+    columns = np.nonzero(
+        (strip[label, :, :3].min(axis=2) > LIGHT_TEXT_MIN).any(axis=0)
+    )[0]
+    padding_px = render.LEGEND_PAD_MM / grid.pixel
+    assert columns.max() < strip.shape[1] - padding_px / 2
 
 
 def test_excluded_copper_is_grey_not_pink(tmp_path: Path):
@@ -287,18 +328,18 @@ def test_overlay_draws_rings_only(tmp_path: Path):
     assert rgba[(*grid.index((3.0, 0.5)), 3)] == 0
 
 
-CONTOUR_COLOUR = "#ff0000"
-CONTOUR_MARGIN = 0.1
+# Antialiased white text: well above the legend's dark background.
+LIGHT_TEXT_MIN = 128
+LEGEND_TEXT_TOLERANCE = 0.3
 SCALE = 3.0
-CONTOUR_STYLE = render.HeatmapStyle(
-    title="Contoured",
+SATURATING_STYLE = render.HeatmapStyle(
+    title="Saturating",
     colourbar_label="mm",
-    png_prefix="contoured",
+    png_prefix="saturating",
     colormap="cividis",
     over_colour=None,
     unreachable_colour="#00ff00",
     scale=SCALE,
-    contour=render.Contour(CONTOUR_COLOUR, CONTOUR_MARGIN),
 )
 
 
@@ -307,20 +348,15 @@ def ramp(width: int, height: int = 20, pixel: float = 0.1) -> np.ndarray:
     return np.tile(np.arange(width) * pixel, (height, 1))
 
 
-def test_overlay_marks_the_contour_and_saturates_beyond_the_scale(tmp_path: Path):
+def test_overlay_saturates_beyond_the_scale(tmp_path: Path):
     dist = ramp(100)
     maps = [coverage("GND", "In1.Cu", dist)]
-    level = D + CONTOUR_MARGIN
 
-    paths = render.write_overlays(tmp_path, grid_of(maps), maps, {}, D, CONTOUR_STYLE)
+    paths = render.write_overlays(
+        tmp_path, grid_of(maps), maps, {}, D, SATURATING_STYLE
+    )
 
     rgba = np.asarray(Image.open(paths["In1.Cu"]).convert("RGBA"))
-    red = rgb(CONTOUR_COLOUR)
-    on_red = [c for c in range(dist.shape[1]) if tuple(rgba[10, c, :3]) == red]
-    # The served side's last pixel: one pixel wide, on every row.
-    (last,) = np.nonzero(dist[0] <= level)[0][-1:]
-    assert on_red == [last]
-    assert (rgba[:, last, :3] == red).all()
     cividis = render.plt.get_cmap("cividis")
     assert tuple(rgba[10, 0, :3]) == tuple(cividis(0.0, bytes=True)[:3])
     top = tuple(cividis(1.0, bytes=True)[:3])
@@ -329,7 +365,7 @@ def test_overlay_marks_the_contour_and_saturates_beyond_the_scale(tmp_path: Path
     assert tuple(rgba[10, beyond[0] - 2, :3]) != top
 
 
-def test_overlay_without_contour_style_draws_none(tmp_path: Path):
+def test_overlay_colours_follow_the_scale(tmp_path: Path):
     dist = ramp(40)
     maps = [coverage("GND", "F.Cu", dist)]
 
@@ -340,7 +376,7 @@ def test_overlay_without_contour_style_draws_none(tmp_path: Path):
     assert (rgba[dist <= D] == expected[dist <= D]).all()
 
 
-def test_render_panels_draws_the_contour_and_the_saturated_colour(tmp_path: Path):
+def test_render_panels_draw_the_saturated_colour(tmp_path: Path):
     width_mm, height_mm = 10.0, 2.0
     snap = Snapshot(
         copper_layers=("In1.Cu",),
@@ -351,7 +387,7 @@ def test_render_panels_draws_the_contour_and_the_saturated_colour(tmp_path: Path
     maps = [coverage("GND", "In1.Cu", ramp(100))]
     out = tmp_path / "heat.png"
 
-    render.render_panels(out, snap, grid, maps, {}, small_d, CONTOUR_STYLE)
+    render.render_panels(out, snap, grid, maps, {}, small_d, SATURATING_STYLE)
 
     rgb_px = np.asarray(Image.open(out).convert("RGB")).astype(int)
 
@@ -375,18 +411,14 @@ def test_render_panels_draws_the_contour_and_the_saturated_colour(tmp_path: Path
     assert top[middle, column(SCALE * small_d + 0.5)]
     assert top[middle, column(width_mm - 0.5)]
     assert not top[middle, column(SCALE * small_d - 0.5)]
-    red = np.nonzero(near(CONTOUR_COLOUR, 150)[middle])[0]
-    assert red.size
-    contour_mm = (red.mean() + 0.5 - x0) / px_per_mm
-    assert contour_mm == pytest.approx(small_d + CONTOUR_MARGIN, abs=0.15)
 
 
 @pytest.mark.parametrize(
     "style, top, extend",
     [
         (STYLE, 0.0, "max"),
-        (CONTOUR_STYLE, SCALE * D, "neither"),
-        (CONTOUR_STYLE, SCALE * D + 0.1, "max"),
+        (SATURATING_STYLE, SCALE * D, "neither"),
+        (SATURATING_STYLE, SCALE * D + 0.1, "max"),
     ],
 )
 def test_colourbar_extends_only_past_values_the_scale_leaves_out(style, top, extend):
@@ -599,6 +631,12 @@ def test_untagged_image_counts_only_at_the_overlay_placement(tmp_path: Path):
 @pytest.mark.parametrize("data", [b"", b"not a png", overlay.PNG_SIGNATURE + b"\0\0"])
 def test_png_text_of_non_png_or_truncated_data_is_empty(data):
     assert overlay.png_text(data) == {}
+
+
+def test_png_size_reads_the_header(tmp_path: Path):
+    render.matplotlib.image.imsave(tmp_path / "s.png", np.zeros((3, 7, 4), np.uint8))
+
+    assert overlay.png_size((tmp_path / "s.png").read_bytes()) == (7, 3)
 
 
 def test_overlay_placement_follows_the_board_outline_raster():
