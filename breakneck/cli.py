@@ -205,7 +205,10 @@ def add_pourstitch_parser(subparsers) -> None:
         help="Stitch pours so every point is within a distance of a via",
     )
     p.add_argument(
-        "--nets", nargs="+", metavar="NET", required=True, help="Nets to stitch"
+        "--nets",
+        nargs="+",
+        metavar="NET",
+        help="Nets to stitch (default: every net with pours on two or more layers)",
     )
     p.add_argument(
         "--distance",
@@ -515,7 +518,7 @@ def execute_pourstitch(args):
         from breakneck import pourstitch, pourstitch_command
 
     options = pourstitch.Options(
-        nets=tuple(args.nets),
+        nets=None if args.nets is None else tuple(args.nets),
         distance=args.distance,
         via=args.via,
         fallback_via=args.fallback_via,

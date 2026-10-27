@@ -188,8 +188,10 @@ def _candidates(snapshot: Snapshot, options: PadviaOptions) -> list[Pad]:
     nets = options.nets
     derived = nets is None
     if derived:
-        nets = sorted({p.net for p in pads})
-    stitchable, _ = snapshot.split_stitchable(nets)
+        # Single-layer pours are expected here, not worth a warning each.
+        stitchable = [n for n in {p.net for p in pads} if snapshot.is_stitchable(n)]
+    else:
+        stitchable, _ = snapshot.split_stitchable(nets)
     if derived:
         logger.info(
             "padvia: nets with via-sized fill near their pads on another layer: "

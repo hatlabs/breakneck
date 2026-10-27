@@ -196,6 +196,17 @@ def test_returnvia_failure_exits_cleanly(monkeypatch, error):
     assert exit_info.value.code == 1
 
 
+def test_pourstitch_without_nets_stitches_every_stitchable_net(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        pourstitch_command, "execute", lambda options, *a, **kw: seen.append(options)
+    )
+
+    cli.execute_pourstitch(parsed(monkeypatch, ["pourstitch"]))
+
+    assert seen[0].nets is None
+
+
 @pytest.mark.parametrize(
     "error", [placement.SplitError("split"), placement.BoardChangedError("changed")]
 )

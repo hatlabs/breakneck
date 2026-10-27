@@ -701,3 +701,12 @@ def test_unfixable_spot_spans_its_pad():
 
     (spot,) = plan.unfixable
     assert spot.extent == pytest.approx(math.hypot(1.5, 1.0))
+
+
+def test_without_nets_single_layer_pours_are_skipped_without_a_warning(log):
+    zones = [zone("GND", ("F.Cu", "B.Cu")), zone("SW", ("F.Cu",))]
+    pads = [pad("GND", (5, 5)), pad("SW", (15, 15), layer="B.Cu")]
+
+    plan_padvia(snapshot(pads, zones=zones), ALL_NETS, [])
+
+    assert not [m for m in log if "SW" in m and "skipping" in m]
