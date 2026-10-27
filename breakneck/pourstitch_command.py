@@ -89,8 +89,9 @@ def execute(
     """Run pourstitch against the open board.
 
     `check` only measures the existing stitching: no planning, no kicad-cli,
-    no vias or markers. Overlays are placed in their own commit, also in a
-    dry run.
+    no vias. With overlays, it removes the markers in the overlay commit,
+    since the heatmap shows what they marked. Overlays are placed in their
+    own commit, also in a dry run.
     """
     kicad = kicad or kipy.KiCad()
     board = kicad.get_board()
@@ -155,4 +156,5 @@ def execute(
             outputs,
             place_overlay,
             OVERLAY_COMMIT,
+            () if check else None,
         )

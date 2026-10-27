@@ -8,7 +8,7 @@ from kipy.proto.board.board_types_pb2 import BoardLayer as BL
 from shapely.geometry import box
 
 from breakneck import cli, drc, overlay, pourstitch_command, render
-from breakneck.commit import eco2_segment
+from breakneck.commit import MARKER_LAYER, eco2_segment
 from breakneck.placement import RunResult, RunSettings
 from breakneck.plan import POURSTITCH_POWER_DISTANCE, StitchClass
 from breakneck.pourstitch import Options
@@ -30,9 +30,11 @@ def snapshot() -> Snapshot:
 
 
 class Board:
-    def __init__(self, enabled=(BL.BL_User_1, BL.BL_User_2)):
+    def __init__(self, enabled=(BL.BL_User_1, BL.BL_User_2), shapes=()):
         self.calls: list = []
         self.enabled = [BL.BL_F_Cu, BL.BL_B_Cu, *enabled]
+        self.shapes = list(shapes)
+        self.removed: list = []
 
     def get_copper_layer_count(self):
         return 2
@@ -43,6 +45,9 @@ class Board:
     def get_reference_images(self):
         return []
 
+    def get_shapes(self):
+        return self.shapes
+
     def refill_zones(self, block=True, max_poll_seconds=0):
         self.calls.append("refill_zones")
 
@@ -52,6 +57,7 @@ class Board:
 
     def remove_items(self, items):
         self.calls.append("remove_items")
+        self.removed += items
 
     def push_commit(self, c, message=""):
         self.calls.append(("push_commit", message))
@@ -134,6 +140,59 @@ def test_check_with_overlay_creates_only_the_image_commit(
     # The placed images carry the PNG data; no file is left behind.
     assert all(i.image_data for i in created)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_check_with_overlay_removes_the_markers_in_the_image_commit(fakes):
+    created, _ = fakes
+    stale = eco2_segment((1.0, 1.0), (2.0, 2.0))
+    board = Board(shapes=[stale])
+    outputs = overlay.Outputs(overlay=True)
+
+    pourstitch_command.execute(OPTIONS, outputs, check=True, kicad=KiCad(board))  # type: ignore[arg-type]
+
+    assert board.calls == [
+        "refill_zones",
+        "begin_commit",
+        "remove_items",
+        ("push_commit", pourstitch_command.OVERLAY_COMMIT),
+    ]
+    assert board.removed == [stale]
+    assert len(created) == len(LAYERS)
+    assert all(i.layer != MARKER_LAYER for i in created)
+
+
+def test_check_without_overlay_leaves_the_markers(fakes, tmp_path: Path):
+    board = Board(shapes=[eco2_segment((1.0, 1.0), (2.0, 2.0))])
+    outputs = overlay.Outputs(render=tmp_path / "heat.png")
+
+    pourstitch_command.execute(OPTIONS, outputs, check=True, kicad=KiCad(board))  # type: ignore[arg-type]
+
+    assert board.calls == ["refill_zones"]
+
+
+def test_check_with_overlay_not_placed_leaves_the_markers(fakes, png_dir):
+    board = Board(enabled=(), shapes=[eco2_segment((1.0, 1.0), (2.0, 2.0))])
+    outputs = overlay.Outputs(overlay=True)
+
+    pourstitch_command.execute(
+        OPTIONS,
+        outputs,
+        check=True,
+        dry_run=True,
+        kicad=KiCad(board),  # type: ignore[arg-type]
+    )
+
+    assert board.calls == ["refill_zones"]
+
+
+def test_placing_run_overlay_leaves_the_markers_to_the_placement(fakes):
+    stale = eco2_segment((1.0, 1.0), (2.0, 2.0))
+    board = Board(shapes=[stale])
+    outputs = overlay.Outputs(overlay=True)
+
+    pourstitch_command.execute(OPTIONS, outputs, dry_run=True, kicad=KiCad(board))  # type: ignore[arg-type]
+
+    assert board.removed == []
 
 
 def test_dry_run_still_places_overlay(fakes, tmp_path: Path):
