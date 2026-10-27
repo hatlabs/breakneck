@@ -26,6 +26,7 @@ from breakneck.returnpath import (
     ReturnFields,
 )
 from breakneck.returnvia import (
+    ReferencePlane,
     ReturnViaOptions,
     ViaReferences,
     plan_return_vias,
@@ -49,8 +50,6 @@ UNREACHABLE_COLOUR = "#b44dff"
 RING_COLOUR = "#ff2a6d"
 COPPER_MAP_NET = "copper"
 SERVED_TITLE = "Return vias: every via end served within {distance:g} mm"
-# Reach past a via's edge over its antipad, the void around it in the plane.
-ANTIPAD_REACH = 0.3
 # Whole steps per threshold, so the step at the threshold falls between two.
 PALETTE_STEPS_PER_DISTANCE = 256
 THRESHOLD = 1 / SCALE
@@ -158,24 +157,38 @@ def copper_maps(
     ]
 
 
+def antipad(
+    fields: ReturnFields, copper: BaseGeometry, plane: ReferencePlane
+) -> BaseGeometry:
+    """`copper` grown to the edge of its clearance hole in `plane`'s fill,
+    which the plane's field leaves as a void."""
+    fill = fields.snapshot.fill(plane.ground, plane.layer)
+    return copper.buffer(fill.distance(copper))
+
+
 def paint_via_ends(
     maps: Sequence[CoverageMap], results: Sequence[PlaneReturn], fields: ReturnFields
 ) -> None:
     """Show each measured via end's own distance on its layers: over the via,
-    and over the layer's copper on its antipad, which the plane's field leaves
-    as a void."""
+    and over the layer's copper on its antipad. The vias go on top, so a
+    neighbour's antipad never covers one."""
     grid = fields.grid
     diameters = {(v.position, v.net): v.diameter for v in fields.snapshot.vias}
     for m in maps:
-        for r in results:
-            if m.layer not in r.layers or r.outcome is not Outcome.MEASURED:
-                continue
-            radius = diameters[(r.position, r.net)] / 2
-            via = Point(r.position).buffer(radius)
-            antipad = Point(r.position).buffer(radius + ANTIPAD_REACH)
-            win = grid.bounds_window(antipad.bounds)
-            on_copper = grid.mask(antipad, win) & ~np.isnan(m.distance[win])
-            m.distance[win][on_copper | grid.mask(via, win)] = r.distance
+        ends = [
+            (r, Point(r.position).buffer(diameters[(r.position, r.net)] / 2))
+            for r in results
+            if m.layer in r.layers and r.outcome is Outcome.MEASURED
+        ]
+        for r, via in ends:
+            assert r.plane is not None
+            hole = antipad(fields, via, r.plane)
+            win = grid.bounds_window(hole.bounds)
+            on_copper = grid.mask(hole, win) & ~np.isnan(m.distance[win])
+            m.distance[win][on_copper] = r.distance
+        for r, via in ends:
+            win = grid.bounds_window(via.bounds)
+            m.distance[win][grid.mask(via, win)] = r.distance
 
 
 def markers(

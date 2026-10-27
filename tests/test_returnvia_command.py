@@ -355,8 +355,8 @@ def field_colour(snap, plane, point) -> tuple[int, ...]:
 
 
 ON_TRACK = (SIG[0] - 2, SIG[1])
-# A via end's distance is painted this far past the via's edge.
-PAINTED_PAST_VIA_MM = 0.3
+# Antipad radius at KiCad's default zone clearance of 0.5 mm.
+WIDE_ANTIPAD = VIA.diameter / 2 + 0.5
 
 
 def test_track_reads_its_reference_planes_field(fakes):
@@ -495,14 +495,17 @@ def front_return(snap) -> float:
     return front.distance
 
 
-def test_via_end_shows_its_measured_distance_over_its_antipad(fakes):
-    fakes.snap = snapshot(returns=[("GND", (6.0, 5.0))])
+@pytest.mark.parametrize("reach", [ANTIPAD, WIDE_ANTIPAD])
+def test_via_end_shows_its_measured_distance_over_its_antipad(fakes, reach):
+    plain = BOARD.difference(Point(SIG).buffer(reach))
+    fakes.snap = snapshot(
+        returns=[("GND", (6.5, 5.0))], zones=[gnd_zone({L: plain for L in INNER})]
+    )
 
     run(Board(), overlay=True, full_map=True)
 
     image = rgba(fakes, "F.Cu")
     (expected,) = palette_at(front_return(fakes.snap))
-    reach = VIA.diameter / 2 + PAINTED_PAST_VIA_MM
     just_inside = (SIG[0] - reach + GRID.pixel / 2, SIG[1])
     just_outside = (SIG[0] - reach - GRID.pixel / 2, SIG[1])
     off_copper = (SIG[0], SIG[1] + reach - GRID.pixel / 2)
@@ -510,6 +513,30 @@ def test_via_end_shows_its_measured_distance_over_its_antipad(fakes):
     assert at(image, just_inside) == expected
     assert at(image, just_outside) != expected
     assert at(image, off_copper)[3] == 0
+
+
+def test_via_shows_its_own_distance_over_a_neighbours_antipad(fakes):
+    # Merged antipads: each via lies inside the other's clearance hole.
+    east = (SIG[0] + 0.8, SIG[1])
+    holes = unary_union([Point(p).buffer(WIDE_ANTIPAD) for p in (SIG, east)])
+    plain = BOARD.difference(holes)
+    fakes.snap = snapshot(
+        signals=(east, SIG),
+        returns=[("GND", (7.0, 5.0))],
+        zones=[gnd_zone({L: plain for L in INNER})],
+    )
+
+    run(Board(), overlay=True, full_map=True)
+
+    image = rgba(fakes, "F.Cu")
+    front = {
+        r.position: r.distance
+        for r in measure_returns(fakes.snap, None, DISTANCE)
+        if r.layers == ("F.Cu",)
+    }
+    assert front[SIG] != front[east]
+    for p in (SIG, east):
+        assert at(image, p) == palette_at(front[p])[0]
 
 
 def test_via_shows_only_on_layers_where_it_has_a_measured_end(fakes):
