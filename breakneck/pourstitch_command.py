@@ -18,6 +18,7 @@ from breakneck.snapshot import Snapshot
 COMMAND = "pourstitch"
 OVERLAY_COMMIT = "breakneck pourstitch overlay"
 OVER_COLOUR = "#ff2a6d"
+EMPTY_TITLE = "Pour stitching: no {nets} nets to stitch"
 STYLE = render.HeatmapStyle(
     title=(
         "Pour stitching: filled = planned via, ring = existing via, "
@@ -119,15 +120,24 @@ def execute(
     _log_coverage(stitcher, snapshot, options, maps, grid)
 
     if outputs.render is not None:
-        render.render_panels(
-            outputs.render,
-            snapshot,
-            grid,
-            maps,
-            markers(snapshot, plan, maps),
-            options.max_distance,
-            STYLE,
-        )
+        if maps:
+            render.render_panels(
+                outputs.render,
+                snapshot,
+                grid,
+                maps,
+                markers(snapshot, plan, maps),
+                options.max_distance,
+                STYLE,
+            )
+        else:
+            # Replaces the previous run's heatmap, which would no longer apply.
+            render.render_outline(
+                outputs.render,
+                snapshot,
+                grid,
+                EMPTY_TITLE.format(nets=options.stitch_class.value),
+            )
         logger.info(f"Wrote {outputs.render}")
 
     if outputs.overlay:

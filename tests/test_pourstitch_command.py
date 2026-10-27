@@ -424,3 +424,25 @@ def test_power_check_measures_and_renders_at_the_power_distance(
     ((maps, distance),) = rendered
     assert {m.net for m in maps} == {"+3.3V"}
     assert distance == POURSTITCH_POWER_DISTANCE
+
+
+def test_render_without_maps_replaces_the_previous_heatmap(
+    fakes, monkeypatch, tmp_path: Path
+):
+    snap = Snapshot(
+        copper_layers=LAYERS,
+        zones=[Zone("GND", LAYERS, 0, POUR, {L: POUR for L in LAYERS})],
+        edge_paths=[[(x, y) for x, y in box(0, 0, 30, 10).exterior.coords]],
+    )
+    monkeypatch.setattr(Snapshot, "from_board", staticmethod(lambda board: snap))
+    path = tmp_path / "heat.png"
+    path.write_bytes(b"stale")
+
+    pourstitch_command.execute(
+        Options(stitch_class=StitchClass.POWER),
+        overlay.Outputs(render=path),
+        check=True,
+        kicad=KiCad(Board()),  # type: ignore[arg-type]
+    )
+
+    assert path.read_bytes().startswith(b"\x89PNG")
