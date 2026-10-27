@@ -30,7 +30,6 @@ from breakneck.returnvia import (
     ReturnViaOptions,
     ViaReferences,
     reference_outlines,
-    resolve_ground_nets,
     via_references,
 )
 from breakneck.returnvia_planner import ReturnViaPlanner
@@ -373,18 +372,19 @@ def execute(
     check_outline(board)
     place_overlay = outputs.overlay and overlay.overlay_ready(board, outputs, dry_run)
 
+    planner = ReturnViaPlanner()
     if check:
         snapshot, plan = measure_only(kicad, board)
     else:
         result = run_placement(
-            ReturnViaPlanner(),
+            planner,
             options,
             RunSettings(COMMAND, dry_run, kicad_cli, allow_splits=allow_splits),
             kicad,
         )
         snapshot, plan = result.snapshot, result.prune.plan
 
-    grounds = resolve_ground_nets(snapshot, options.ground_nets)
+    grounds = planner.grounds(snapshot, options)
     fields = ReturnFields(with_returns(snapshot, plan.units))
     references = via_references(fields.snapshot, grounds)
     results = fields.measure(references, options.distance)

@@ -958,6 +958,42 @@ def test_forced_vias_serve_nothing(fakes, log):
     assert any("1 of 1 vias unserved" in m for m in log)
 
 
+MISSPELLED_GROUNDS = ("GND", "GDN")
+
+
+def copperless_warnings(log: list[str]) -> list[str]:
+    return [m for m in log if "has no zones, vias or pads" in m]
+
+
+@pytest.mark.parametrize("check", [True, False])
+def test_returnvia_warns_once_about_a_misspelled_ground_net(fakes, log, check):
+    returnvia_command.execute(
+        ReturnViaOptions(distance=DISTANCE, ground_nets=MISSPELLED_GROUNDS),
+        overlay.Outputs(),
+        check=check,
+        dry_run=True,
+        kicad=KiCad(Board()),  # type: ignore[arg-type]
+    )
+
+    (warning,) = copperless_warnings(log)
+    assert "GDN" in warning
+
+
+@pytest.mark.parametrize("check", [True, False])
+def test_pourstitch_warns_once_about_a_misspelled_ground_net(fakes, log, check):
+    fakes.snap = snapshot(returns=[("GND", (6.0, 5.0))])
+    pourstitch_command.execute(
+        Options(ground_nets=MISSPELLED_GROUNDS),
+        overlay.Outputs(),
+        check=check,
+        dry_run=True,
+        kicad=KiCad(Board()),  # type: ignore[arg-type]
+    )
+
+    (warning,) = copperless_warnings(log)
+    assert "GDN" in warning
+
+
 def test_returnvia_and_pourstitch_replace_each_others_overlays(fakes):
     fakes.snap = snapshot(returns=[("GND", (6.0, 5.0))])
     pourstitch_command.execute(
