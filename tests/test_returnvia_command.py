@@ -19,7 +19,16 @@ from breakneck.pourstitch import Options
 from breakneck.raster import CoverageMap, Grid
 from breakneck.returnpath import NoBoardOutlineError, ReturnFields, measure_returns
 from breakneck.returnvia import NoGroundNetsError, ReferencePlane, ReturnViaOptions
-from breakneck.snapshot import Pad, PadKind, Snapshot, Track, Via, ViaSize, Zone
+from breakneck.snapshot import (
+    NM_PER_MM,
+    Pad,
+    PadKind,
+    Snapshot,
+    Track,
+    Via,
+    ViaSize,
+    Zone,
+)
 
 FOUR_LAYERS = ("F.Cu", "In1.Cu", "In2.Cu", "B.Cu")
 INNER = ("In1.Cu", "In2.Cu")
@@ -197,7 +206,8 @@ def run(board, tmp_path=None, check=True, dry_run=False, **outputs):
 
 
 def rgba(path: Path) -> np.ndarray:
-    return np.asarray(Image.open(path).convert("RGBA"))
+    """An overlay's board pixels, without the legend."""
+    return np.asarray(Image.open(path).convert("RGBA"))[: GRID.height, : GRID.width]
 
 
 def at(image: np.ndarray, point) -> tuple[int, ...]:
@@ -249,6 +259,24 @@ def test_check_overlay_images_only_the_via_ends_signal_layers(fakes, tmp_path):
         "returnvia-F_Cu.png",
     ]
     assert sorted(i.layer for i in fakes.created) == [BL.BL_User_1, BL.BL_User_4]
+
+
+def test_overlay_board_pixels_sit_on_the_raster_and_the_legend_below_it(
+    fakes, tmp_path: Path
+):
+    fakes.snap = snapshot(returns=[("GND", (6.0, 5.0))])
+
+    run(Board(), tmp_path)
+
+    front = next(i for i in fakes.created if i.layer == BL.BL_User_1)
+    width, height = Image.open(tmp_path / "returnvia-F_Cu.png").size
+    pixel = overlay.MM_PER_INCH / overlay.OVERLAY_PPI * front.image_scale
+    left = front.position.x / NM_PER_MM - width * pixel / 2
+    top = front.position.y / NM_PER_MM - height * pixel / 2
+    x0, y0, _, y1 = BOARD.bounds
+    assert (left, top) == pytest.approx((x0, y0))
+    assert height > GRID.height
+    assert y0 + GRID.height * GRID.pixel >= y1
 
 
 def test_unserved_end_gets_a_ring_only_on_its_signal_layer(fakes, tmp_path: Path):

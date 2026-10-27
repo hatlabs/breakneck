@@ -10,7 +10,7 @@ from kipy.proto.board.board_types_pb2 import BoardLayer as BL
 from PIL import Image
 from shapely.geometry import box
 
-from breakneck import cli, overlay, pourstitch_command, render
+from breakneck import cli, overlay, pourstitch_command, render, returnvia_command
 from breakneck.commit import CreateItemsError
 from breakneck.plan import Plan, PlannedUnit, UnfixableSpot
 from breakneck.raster import CoverageMap, Grid
@@ -76,7 +76,7 @@ def maps_for(layer_nets: dict[str, list[tuple[str, np.ndarray]]]) -> list[Covera
     ]
 
 
-def test_overlay_image_has_raster_size_and_transparent_background(tmp_path: Path):
+def test_overlay_board_area_has_raster_size_and_transparent_background(tmp_path):
     a = np.full((30, 50), np.nan)
     a[:, :20] = 1.0
     b = np.full((30, 50), np.nan)
@@ -86,13 +86,47 @@ def test_overlay_image_has_raster_size_and_transparent_background(tmp_path: Path
     paths = render.write_overlays(tmp_path, grid_of(maps), maps, {}, D, STYLE)
 
     img = Image.open(paths["F.Cu"])
-    assert img.size == (50, 30)
     assert img.info["dpi"] == pytest.approx((overlay.OVERLAY_PPI,) * 2, abs=0.01)
-    rgba = np.asarray(img.convert("RGBA"))
+    rgba = np.asarray(img.convert("RGBA"))[:30, :50]
     assert (rgba[:, 20:30, 3] == 0).all()
     assert (rgba[:, :20, 3] == 255).all()
     assert (rgba[:, 30:, 3] == 255).all()
     assert tuple(rgba[0, 40, :3]) == (0xFF, 0x2A, 0x6D)
+
+
+@pytest.mark.parametrize("style", [STYLE, returnvia_command.STYLE])
+def test_overlay_keeps_the_board_pixels_and_adds_a_legend_below(tmp_path, style):
+    dist = ramp(50, height=30)
+    dist[:, 40:] = np.nan
+    maps = [coverage("GND", "F.Cu", dist)]
+    grid = grid_of(maps)
+
+    path = render.write_overlays(tmp_path, grid, maps, {}, D, style)["F.Cu"]
+
+    rgba = np.asarray(Image.open(path).convert("RGBA"))
+    board = render.overlay_rgba(grid, maps, {}, D, style)
+    assert (rgba[: grid.height, : grid.width] == board).all()
+    assert (rgba[: grid.height, grid.width :, 3] == 0).all()
+    strip = rgba[grid.height :]
+    assert strip.shape[0] > 0
+    white = (strip[..., :3] == 255).all(axis=2)
+    assert white.any()
+    assert (strip[..., 3] == 255).any()
+
+
+def test_legend_text_is_about_the_legend_height(tmp_path: Path):
+    maps = [coverage("GND", "F.Cu", np.zeros((10, 10)))]
+    grid = grid_of(maps)
+
+    path = render.write_overlays(tmp_path, grid, maps, {}, D, STYLE)["F.Cu"]
+
+    strip = np.asarray(Image.open(path).convert("RGBA"))[grid.height :]
+    # Rows of the label text: the lowest run of rows with light pixels.
+    light = (strip[..., :3].min(axis=2) > LIGHT_TEXT_MIN).any(axis=1)
+    rows = np.nonzero(light)[0]
+    runs = np.split(rows, np.nonzero(np.diff(rows) > 1)[0] + 1)
+    text_mm = len(runs[-1]) * grid.pixel
+    assert render.LEGEND_TEXT_MM / 2 <= text_mm <= render.LEGEND_TEXT_MM * 1.5
 
 
 def test_excluded_copper_is_grey_not_pink(tmp_path: Path):
@@ -287,6 +321,8 @@ def test_overlay_draws_rings_only(tmp_path: Path):
     assert rgba[(*grid.index((3.0, 0.5)), 3)] == 0
 
 
+# Antialiased white text: well above the legend's dark background.
+LIGHT_TEXT_MIN = 128
 SCALE = 3.0
 SATURATING_STYLE = render.HeatmapStyle(
     title="Saturating",
@@ -587,6 +623,12 @@ def test_untagged_image_counts_only_at_the_overlay_placement(tmp_path: Path):
 @pytest.mark.parametrize("data", [b"", b"not a png", overlay.PNG_SIGNATURE + b"\0\0"])
 def test_png_text_of_non_png_or_truncated_data_is_empty(data):
     assert overlay.png_text(data) == {}
+
+
+def test_png_size_reads_the_header(tmp_path: Path):
+    render.matplotlib.image.imsave(tmp_path / "s.png", np.zeros((3, 7, 4), np.uint8))
+
+    assert overlay.png_size((tmp_path / "s.png").read_bytes()) == (7, 3)
 
 
 def test_overlay_placement_follows_the_board_outline_raster():

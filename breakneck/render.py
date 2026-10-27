@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -11,14 +12,17 @@ import matplotlib
 
 matplotlib.use("Agg")
 
+import matplotlib.cm
 import matplotlib.colors
 import matplotlib.image
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 from matplotlib.patches import Circle
+from matplotlib.transforms import Bbox
+from PIL import Image
 
-from breakneck.overlay import OVERLAY_PPI, OVERLAY_TAG
+from breakneck.overlay import MM_PER_INCH, OVERLAY_PPI, OVERLAY_TAG
 from breakneck.raster import CoverageMap, Grid
 from breakneck.snapshot import Point2, Snapshot
 
@@ -37,6 +41,12 @@ PANEL_COLUMNS = 2
 PANEL_INCHES = 8
 PANEL_DPI = 100
 MARGIN_MM = 0.5
+POINTS_PER_INCH = 72
+# The overlay legend, in board mm at the overlay's 0.1 mm pixel.
+LEGEND_TEXT_MM = 1.5
+LEGEND_BAR_WIDTH_MM = 40.0
+LEGEND_BAR_HEIGHT_MM = 2.0
+LEGEND_PAD_MM = 1.0
 
 
 @dataclass(frozen=True)
@@ -292,6 +302,67 @@ def overlay_rgba(
     return rgba
 
 
+def _inches(mm: float) -> float:
+    return mm / MM_PER_INCH
+
+
+def legend_rgba(
+    maps: Sequence[CoverageMap], distance: float, style: HeatmapStyle
+) -> npt.NDArray[np.uint8]:
+    """The colourbar and its label, white on the figure background, drawn at
+    the overlay resolution so its text reads at `LEGEND_TEXT_MM` on the board."""
+    fig = plt.figure(
+        figsize=(_inches(LEGEND_BAR_WIDTH_MM), _inches(LEGEND_BAR_HEIGHT_MM)),
+        dpi=OVERLAY_PPI,
+    )
+    cax = fig.add_axes((0, 0, 1, 1))
+    scale = matplotlib.cm.ScalarMappable(
+        matplotlib.colors.Normalize(vmin=0, vmax=style.scale * distance),
+        _colormap(style),
+    )
+    cb = fig.colorbar(
+        scale,
+        cax=cax,
+        orientation="horizontal",
+        extend=colourbar_extend(maps, distance, style),
+    )
+    font = _inches(LEGEND_TEXT_MM) * POINTS_PER_INCH
+    cb.set_label(
+        style.colourbar_label.format(distance=distance),
+        color="white",
+        size=font,
+        loc="left",
+    )
+    cb.ax.tick_params(colors="white", labelsize=font)
+    # The tight bounding box cuts a label wider than the bar off at the
+    # figure's edge, so the saved area adds the label's own extent.
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()  # type: ignore[attr-defined]
+    label = cb.ax.xaxis.label.get_window_extent(renderer)
+    saved = Bbox.union(
+        [fig.get_tightbbox(renderer), label.transformed(fig.dpi_scale_trans.inverted())]
+    ).padded(_inches(LEGEND_PAD_MM))
+    buf = io.BytesIO()
+    fig.savefig(
+        buf, format="png", dpi=OVERLAY_PPI, facecolor=BACKGROUND, bbox_inches=saved
+    )
+    plt.close(fig)
+    buf.seek(0)
+    return np.asarray(Image.open(buf).convert("RGBA"))
+
+
+def with_legend(
+    board: npt.NDArray[np.uint8], legend: npt.NDArray[np.uint8]
+) -> npt.NDArray[np.uint8]:
+    """The board pixels at the top left, the legend below them, transparent
+    elsewhere: pixel (0, 0) stays at the raster origin."""
+    height, width = board.shape[:2]
+    out = np.zeros((height + legend.shape[0], max(width, legend.shape[1]), 4), np.uint8)
+    out[:height, :width] = board
+    out[height:, : legend.shape[1]] = legend
+    return out
+
+
 def write_overlays(
     out_dir: Path,
     grid: Grid,
@@ -300,8 +371,10 @@ def write_overlays(
     distance: float,
     style: HeatmapStyle,
 ) -> dict[str, Path]:
-    """One overlay PNG per copper layer that has maps."""
+    """One overlay PNG per copper layer that has maps, each with the legend
+    below the board."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    legend = legend_rgba(maps, distance, style)
     by_layer: dict[str, list[CoverageMap]] = {}
     for m in maps:
         by_layer.setdefault(m.layer, []).append(m)
@@ -310,7 +383,9 @@ def write_overlays(
         path = out_dir / f"{style.png_prefix}-{layer.replace('.', '_')}.png"
         matplotlib.image.imsave(
             path,
-            overlay_rgba(grid, layer_maps, markers, distance, style),
+            with_legend(
+                overlay_rgba(grid, layer_maps, markers, distance, style), legend
+            ),
             dpi=OVERLAY_PPI,
             metadata=dict([OVERLAY_TAG]),
         )
