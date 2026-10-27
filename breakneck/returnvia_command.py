@@ -12,9 +12,8 @@ import numpy as np
 from loguru import logger
 
 from breakneck import overlay, render
-from breakneck.commit import refill_tolerant
-from breakneck.placement import RunSettings, run_placement
-from breakneck.plan import QUANTISATION, Plan, PlannedUnit
+from breakneck.placement import RunSettings, measure_only, run_placement
+from breakneck.plan import QUANTISATION, PlannedUnit
 from breakneck.raster import CoverageMap
 from breakneck.returnpath import NoBoardOutlineError, PlaneReturn, ReturnFields
 from breakneck.returnvia import (
@@ -171,10 +170,7 @@ def execute(
     )
 
     if check:
-        if not refill_tolerant(kicad, board):
-            logger.warning("Zone refill not confirmed; fills may be stale")
-        snapshot = Snapshot.from_board(board)
-        plan = Plan()
+        snapshot, plan = measure_only(kicad, board)
     else:
         result = run_placement(
             plan_return_vias,

@@ -9,8 +9,7 @@ import kipy.board
 from loguru import logger
 
 from breakneck import overlay, render
-from breakneck.commit import refill_tolerant
-from breakneck.placement import RunSettings, run_placement
+from breakneck.placement import RunSettings, measure_only, run_placement
 from breakneck.plan import Plan
 from breakneck.pourstitch import Options, PourStitcher, summarise
 from breakneck.raster import CoverageMap, Grid
@@ -100,10 +99,7 @@ def execute(
 
     stitcher = PourStitcher()
     if check:
-        if not refill_tolerant(kicad, board):
-            logger.warning("Zone refill not confirmed; fills may be stale")
-        snapshot = Snapshot.from_board(board)
-        plan = Plan()
+        snapshot, plan = measure_only(kicad, board)
     else:
         result = run_placement(
             stitcher,
