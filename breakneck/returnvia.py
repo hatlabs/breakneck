@@ -1,10 +1,8 @@
 """Return vias: a ground via near every via on a non-ground net.
 
-This straight-line check plans the missing vias for `returnvia` and drives
-`gndvia`, which only draws lines from each unserved via to its nearest
-return. It uses only core dependencies, so `gndvia` runs on the base
-install; the `returnvia` command needs the `place` extra, because it
-reports the distance through each reference plane (see `returnpath`).
+The planner places the missing vias by straight-line distance. Each via's
+reference planes are resolved here; the `returnvia` command measures the
+distance through them (see `returnpath`), which needs the `place` extra.
 """
 
 from __future__ import annotations
@@ -53,7 +51,6 @@ class Unserved:
     net: str
     diameter: float
     ground: str | None
-    nearest_return: Point2 | None
 
 
 class NoGroundNetsError(ValueError):
@@ -128,25 +125,8 @@ def unserved_vias(
             and math.dist(nearest, v.position) <= distance + DISTANCE_EPSILON
         ):
             continue
-        out.append(Unserved(v.position, v.net, v.diameter, ground, nearest))
+        out.append(Unserved(v.position, v.net, v.diameter, ground))
     return out
-
-
-def return_lines(
-    snapshot: Snapshot, ground_nets: Iterable[str] | None, distance: float
-) -> tuple[list[tuple[Point2, Point2]], list[Point2]]:
-    """`gndvia` output: lines from unserved vias to their nearest return.
-
-    Vias outside every ground zone, or whose ground has no return at all,
-    get a marker position instead of a line.
-    """
-    lines, markers = [], []
-    for u in unserved_vias(snapshot, ground_nets, distance):
-        if u.nearest_return is None:
-            markers.append(u.position)
-        else:
-            lines.append((u.position, u.nearest_return))
-    return lines, markers
 
 
 def _spot_ok(

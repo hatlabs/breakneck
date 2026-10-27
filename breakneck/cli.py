@@ -15,11 +15,7 @@ import breakneck.footprint
 import breakneck.overlay
 from breakneck.clearvias import stitching_vias
 from breakneck.commit import (
-    Marker,
-    MarkerKind,
     commit_label,
-    eco2_segment,
-    marker_items,
     push_tolerant,
     refill_after_commit,
 )
@@ -32,12 +28,7 @@ from breakneck.placement import (
     run_placement,
 )
 from breakneck.plan import POURSTITCH_DISTANCE, POURSTITCH_FALLBACK_VIA
-from breakneck.returnvia import (
-    DEFAULT_DISTANCE,
-    NoGroundNetsError,
-    ReturnViaOptions,
-    return_lines,
-)
+from breakneck.returnvia import DEFAULT_DISTANCE, NoGroundNetsError, ReturnViaOptions
 from breakneck.snapshot import (
     Snapshot,
     ViaSize,
@@ -168,40 +159,6 @@ def execute_cut(args):
         return
 
     break_tracks(board, bnfootprints, tracks, dry_run=args.dry_run)
-
-
-def execute_gndvia_check(args):
-    """Draw a User.Eco2 line from each via lacking a return to its nearest one.
-
-    Vias outside every ground zone, or whose ground has no return at all,
-    get a marker instead.
-    """
-    kicad = kipy.KiCad()
-    board = kicad.get_board()
-    snapshot = Snapshot.from_board(board)
-
-    with _exit_on(NoGroundNetsError):
-        lines, unmarked = return_lines(snapshot, args.ground_nets, args.distance)
-    logger.info(
-        f"{len(lines) + len(unmarked)} vias without a return within "
-        f"{args.distance} mm ({len(unmarked)} without a ground or any return)"
-    )
-    items = [eco2_segment(a, b) for a, b in lines] + marker_items(
-        [Marker(p, MarkerKind.UNFIXABLE) for p in unmarked]
-    )
-
-    eco2_shapes = [
-        shape for shape in board.get_shapes() if shape.layer == BL.BL_Eco2_User
-    ]
-
-    commit = board.begin_commit()
-    board.remove_items(eco2_shapes)
-    if items:
-        board.create_items(items)
-    if args.dry_run:
-        board.drop_commit(commit)
-    else:
-        board.push_commit(commit)
 
 
 # Placement failures that leave the board untouched and need no traceback.
@@ -381,19 +338,6 @@ def parse_args():
     )
 
     cut_parser.add_argument("--netclass", type=str, help="Netclass to break tracks on")
-
-    gnd_via_parser = subparsers.add_parser(
-        "gndvia", help="Visualize vias without a nearby ground return via"
-    )
-
-    gnd_via_parser.add_argument(
-        "--distance",
-        "-d",
-        type=float,
-        default=DEFAULT_DISTANCE,
-        help="Maximum distance to a return via, in mm",
-    )
-    _add_ground_nets_argument(gnd_via_parser)
 
     padvia_parser = subparsers.add_parser(
         "padvia", help="Place a via and stub for every unserved SMD pad"
@@ -608,9 +552,6 @@ def main():
     match args.command:
         case "cut":
             execute_cut(args)
-
-        case "gndvia":
-            execute_gndvia_check(args)
 
         case "padvia":
             execute_padvia(args)
