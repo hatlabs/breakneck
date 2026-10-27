@@ -17,7 +17,7 @@ from breakneck.placement import RunResult
 from breakneck.plan import Plan, PlannedUnit
 from breakneck.pourstitch import Options
 from breakneck.raster import CoverageMap, Grid
-from breakneck.returnpath import NoBoardOutlineError, ReturnFields
+from breakneck.returnpath import NoBoardOutlineError, ReturnFields, measure_returns
 from breakneck.returnvia import NoGroundNetsError, ReferencePlane, ReturnViaOptions
 from breakneck.snapshot import Pad, PadKind, Snapshot, Track, Via, ViaSize, Zone
 
@@ -311,7 +311,7 @@ def test_track_outside_every_ground_outline_is_unreachable(fakes, tmp_path: Path
     assert at(rgba(tmp_path / "returnvia-F_Cu.png"), (4.3, SIG[1])) != unreachable
 
 
-def test_only_non_ground_copper_is_shown(fakes, tmp_path: Path):
+def test_every_nets_copper_is_shown(fakes, tmp_path: Path):
     snap = snapshot(returns=[("GND", (6.0, 5.0))])
     gnd_pour, pwr_pour, pad_at = box(12, 0, 20, 4), box(12, 6, 20, 10), (8.0, 8.0)
     pad = Pad(
@@ -344,8 +344,46 @@ def test_only_non_ground_copper_is_shown(fakes, tmp_path: Path):
     assert at(image, ON_TRACK)[3] == 255
     assert at(image, pad_at)[3] == 255
     assert at(image, (16.0, 8.0))[3] == 255
-    assert at(image, (16.0, 2.0))[3] == 0
+    assert at(image, (16.0, 2.0))[3] == 255
     assert at(image, (8.0, 2.0))[3] == 0
+
+
+def front_return(snap) -> float:
+    (front,) = [
+        r for r in measure_returns(snap, None, DISTANCE) if r.layers == ("F.Cu",)
+    ]
+    return front.distance
+
+
+def test_via_end_shows_its_measured_distance_over_its_antipad(fakes, tmp_path):
+    fakes.snap = snapshot(returns=[("GND", (6.0, 5.0))])
+
+    run(Board(), tmp_path)
+
+    image = rgba(tmp_path / "returnvia-F_Cu.png")
+    (expected,) = palette_at(front_return(fakes.snap))
+    in_antipad = (SIG[0] - ANTIPAD + 0.05, SIG[1])
+    assert at(image, SIG) == expected
+    assert at(image, in_antipad) == expected
+
+
+def test_via_shows_only_on_layers_where_it_has_a_measured_end(fakes, tmp_path):
+    # SIG2 connects on F.Cu and In2.Cu; it passes B.Cu without copper there.
+    sig2 = (15.0, 5.0)
+    snap = snapshot(signals=(SIG, sig2), returns=[("GND", (6.0, 5.0))])
+    snap.tracks = [
+        t
+        for t in snap.tracks
+        if not (t.net == "SIG" and t.layer == "B.Cu" and t.centreline.coords[0] == sig2)
+    ]
+    snap.tracks.append(
+        Track("SIG2:In2", "SIG", "In2.Cu", 0.2, LineString([sig2, (18.0, 5.0)]))
+    )
+    fakes.snap = snap
+
+    run(Board(), tmp_path)
+
+    assert at(rgba(tmp_path / "returnvia-B_Cu.png"), sig2)[3] == 0
 
 
 def test_check_logs_each_unserved_via_plane_and_commits_nothing(fakes, log):
