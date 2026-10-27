@@ -30,7 +30,6 @@ MM_PER_INCH = 25.4
 # 254 PPI is exactly 0.1 mm per pixel and exactly 10000 pixels per metre in
 # the PNG pHYs chunk, so neither side has to round.
 OVERLAY_PPI = 254
-OVERLAY_COMMIT = "breakneck pourstitch overlay"
 OVERLAY_TAG = ("breakneck", "pourstitch-overlay")
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 PNG_CHUNK_HEADER = struct.Struct(">I4s")
@@ -169,6 +168,7 @@ def place_overlays(
     board: kipy.board.Board,
     images: Sequence[OverlayImage],
     overlay_layers: Sequence[str],
+    commit_label: str,
 ) -> bool:
     """Replace breakneck's overlays on the overlay layers in one commit.
 
@@ -196,7 +196,7 @@ def place_overlays(
     except BaseException:
         board.drop_commit(commit)
         raise
-    board.push_commit(commit, OVERLAY_COMMIT)
+    board.push_commit(commit, commit_label)
     logger.info(
         f"Placed {len(images)} overlay images"
         + (f", replacing {len(old)}" if old else "")

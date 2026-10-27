@@ -1,9 +1,10 @@
-"""Pour-stitch distance heatmaps: a panel figure and per-layer overlay PNGs."""
+"""Distance heatmaps: a panel figure and per-layer overlay PNGs."""
 
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib
@@ -18,17 +19,18 @@ import numpy.typing as npt
 from matplotlib.patches import Circle
 
 from breakneck.overlay import OVERLAY_PPI, OVERLAY_TAG
-from breakneck.plan import Plan
-from breakneck.pourstitch import CoverageMap, Grid
-from breakneck.snapshot import Snapshot
+from breakneck.raster import CoverageMap, Grid
+from breakneck.snapshot import Point2, Snapshot
 
-COLORMAP = "viridis"
-OVER_COLOUR = "#ff2a6d"
-# Any value above the top of the colour scale is drawn in OVER_COLOUR.
-OVER_SCALE = 2.0
 BACKGROUND = "#101010"
 OUTLINE_COLOUR = "#888888"
 UNFIXABLE_COLOUR = "cyan"
+MARKER_COLOUR = "white"
+RING_LINE_WIDTH = 0.8
+CROSS_SIZE = 5
+CROSS_LINE_WIDTH = 1.2
+# Two pixels, so a ring stays visible on the board zoomed out.
+OVERLAY_RING_WIDTH_MM = 0.2
 # Neutral, so copper no via can reach reads apart from the distance scale.
 UNSTITCHABLE_COLOUR = "#a0a0a0"
 PANEL_COLUMNS = 2
@@ -37,10 +39,53 @@ PANEL_DPI = 100
 MARGIN_MM = 0.5
 
 
-def _colormap() -> matplotlib.colors.Colormap:
-    cmap = plt.get_cmap(COLORMAP).copy()
-    cmap.set_over(OVER_COLOUR)
+@dataclass(frozen=True)
+class HeatmapStyle:
+    """A command's look; `colourbar_label` may use `{distance}`.
+
+    Without an over colour, values above the scale saturate at its top.
+    Unreachable copper (infinite distance) has its own colour.
+    """
+
+    title: str
+    colourbar_label: str
+    png_prefix: str
+    colormap: str
+    over_colour: str | None
+    unreachable_colour: str
+
+
+Disc = tuple[Point2, float]
+Cross = tuple[str, Point2]
+MapKey = tuple[str, str]
+
+
+@dataclass(frozen=True)
+class Markers:
+    """What is drawn over one map: outlined circles and filled circles as
+    (centre, radius) in board mm, and crosses as (layer, position).
+
+    Crosses are the net's, in drawing order; each map's panel draws those on
+    its own layers, so a folded panel keeps the order across its layers.
+    """
+
+    rings: tuple[Disc, ...] = ()
+    dots: tuple[Disc, ...] = ()
+    crosses: tuple[Cross, ...] = ()
+
+
+NO_MARKERS = Markers()
+
+
+def _colormap(style: HeatmapStyle) -> matplotlib.colors.Colormap:
+    cmap = plt.get_cmap(style.colormap).copy()
+    if style.over_colour is not None:
+        cmap.set_over(style.over_colour)
     return cmap
+
+
+def _rgba_bytes(colour: str) -> npt.NDArray[np.uint8]:
+    return np.round(matplotlib.colors.to_rgba_array(colour)[0] * 255).astype(np.uint8)
 
 
 def _same(a: CoverageMap, b: CoverageMap) -> bool:
@@ -66,13 +111,34 @@ def panels(maps: Sequence[CoverageMap]) -> list[tuple[CoverageMap, list[str]]]:
     return out
 
 
+def panel_markers(
+    markers: Mapping[MapKey, Markers], m: CoverageMap, twins: Sequence[str]
+) -> Markers:
+    """Markers of a panel's map and of the layers folded into it.
+
+    Circles repeat across a net's identical layers and are drawn once;
+    crosses are those of the panel's layers.
+    """
+    out = markers.get((m.net, m.layer), NO_MARKERS)
+    for layer in twins:
+        twin = markers.get((m.net, layer), NO_MARKERS)
+        out = Markers(
+            out.rings + tuple(r for r in twin.rings if r not in out.rings),
+            out.dots + tuple(d for d in twin.dots if d not in out.dots),
+            out.crosses,
+        )
+    layers = (m.layer, *twins)
+    return Markers(out.rings, out.dots, tuple(c for c in out.crosses if c[0] in layers))
+
+
 def render_panels(
     path: Path,
     snapshot: Snapshot,
     grid: Grid,
     maps: Sequence[CoverageMap],
-    plan: Plan,
+    markers: Mapping[MapKey, Markers],
     distance: float,
+    style: HeatmapStyle,
 ) -> None:
     shown = panels(maps)
     if not shown:
@@ -89,24 +155,31 @@ def render_panels(
         squeeze=False,
     )
     fig.patch.set_facecolor(BACKGROUND)
-    cmap = _colormap()
+    cmap = _colormap(style)
     grey = matplotlib.colors.ListedColormap([UNSTITCHABLE_COLOUR])
+    unreachable = matplotlib.colors.ListedColormap([style.unreachable_colour])
     image = None
     for ax in axs.ravel()[len(shown) :]:
         ax.set_visible(False)
     for ax, (m, twins) in zip(axs.ravel(), shown):
         ax.set_facecolor(BACKGROUND)
         extent = (x0, x1, y1, y0)
-        # imshow draws non-finite values as background; copper no stitch
-        # reaches (inf) belongs in the over colour.
-        shown_distance = np.where(
-            np.isinf(m.distance), OVER_SCALE * distance, m.distance
-        )
+        # imshow draws non-finite values as background, so copper no seed
+        # reaches (inf) gets a layer of its own.
+        lost = np.isinf(m.distance) & ~m.unstitchable
         image = ax.imshow(
-            np.ma.masked_where(m.unstitchable | np.isnan(m.distance), shown_distance),
+            np.ma.masked_where(
+                m.unstitchable | lost | np.isnan(m.distance), m.distance
+            ),
             cmap=cmap,
             vmin=0,
             vmax=distance,
+            extent=extent,
+            interpolation="nearest",
+        )
+        ax.imshow(
+            np.ma.masked_where(~lost, lost),
+            cmap=unreachable,
             extent=extent,
             interpolation="nearest",
         )
@@ -116,19 +189,23 @@ def render_panels(
             extent=extent,
             interpolation="nearest",
         )
-        for v in snapshot.vias:
-            if v.net == m.net:
-                ax.add_patch(
-                    Circle(
-                        v.position, v.diameter / 2, fill=False, color="white", lw=0.8
-                    )
+        marks = panel_markers(markers, m, twins)
+        for centre, radius in marks.rings:
+            ax.add_patch(
+                Circle(
+                    centre, radius, fill=False, color=MARKER_COLOUR, lw=RING_LINE_WIDTH
                 )
-        for u in plan.units:
-            if u.net == m.net:
-                ax.add_patch(Circle(u.position, u.size.diameter / 2, color="white"))
-        for s in plan.unfixable:
-            if s.net == m.net and s.layer in (m.layer, *twins):
-                ax.plot(*s.position, "x", color=UNFIXABLE_COLOUR, ms=5, mew=1.2)
+            )
+        for centre, radius in marks.dots:
+            ax.add_patch(Circle(centre, radius, color=MARKER_COLOUR))
+        for _, position in marks.crosses:
+            ax.plot(
+                *position,
+                "x",
+                color=UNFIXABLE_COLOUR,
+                ms=CROSS_SIZE,
+                mew=CROSS_LINE_WIDTH,
+            )
         outline = snapshot.board_outline
         for poly in getattr(outline, "geoms", [outline]):
             ax.plot(*poly.exterior.xy, color=OUTLINE_COLOUR, lw=0.8)
@@ -144,53 +221,72 @@ def render_panels(
     cb = fig.colorbar(
         image, ax=axs, orientation="horizontal", fraction=0.03, pad=0.03, extend="max"
     )
-    cb.set_label(
-        f"distance to nearest stitch through the copper (mm); pink > {distance:g} mm",
-        color="white",
-    )
+    cb.set_label(style.colourbar_label.format(distance=distance), color="white")
     cb.ax.tick_params(colors="white")
-    fig.suptitle(
-        "Pour stitching: filled = planned via, ring = existing via, "
-        "cyan x = no via fits, grey = out of reach of any two-layer spot",
-        color="white",
-    )
+    fig.suptitle(style.title, color="white")
     fig.savefig(path, dpi=PANEL_DPI, facecolor=fig.get_facecolor(), bbox_inches="tight")
     plt.close(fig)
 
 
-def overlay_rgba(maps: Sequence[CoverageMap], distance: float) -> npt.NDArray[np.uint8]:
+def _draw_ring(
+    rgba: npt.NDArray[np.uint8], grid: Grid, centre: Point2, radius: float
+) -> None:
+    half = OVERLAY_RING_WIDTH_MM / 2
+    rs, cs = grid.window(grid.index(centre), radius + half)
+    dx = grid.xs[cs][np.newaxis, :] - centre[0]
+    dy = grid.ys[rs][:, np.newaxis] - centre[1]
+    on = np.abs(np.hypot(dx, dy) - radius) <= half
+    rgba[rs, cs][on] = _rgba_bytes(MARKER_COLOUR)
+
+
+def overlay_rgba(
+    grid: Grid,
+    maps: Sequence[CoverageMap],
+    markers: Mapping[MapKey, Markers],
+    distance: float,
+    style: HeatmapStyle,
+) -> npt.NDArray[np.uint8]:
     """Composite heatmap of one layer's pours; transparent outside copper.
 
     A layer's pours of different nets don't overlap, so later maps only fill
-    pixels the earlier ones left empty.
+    pixels the earlier ones left empty. Only the markers' rings are drawn:
+    on the board, dots and crosses are vias and markers of their own.
     """
     shape = maps[0].distance.shape
     rgba = np.zeros((*shape, 4), np.uint8)
-    cmap = _colormap()
+    cmap = _colormap(style)
     norm = matplotlib.colors.Normalize(vmin=0, vmax=distance)
-    grey = matplotlib.colors.to_rgba_array(UNSTITCHABLE_COLOUR)[0]
     for m in maps:
         inside = ~np.isnan(m.distance)
         colours = cmap(norm(np.where(inside, m.distance, 0)), bytes=True)
         rgba[inside] = colours[inside]
-        rgba[m.unstitchable] = np.round(grey * 255).astype(np.uint8)
+        rgba[np.isinf(m.distance)] = _rgba_bytes(style.unreachable_colour)
+        rgba[m.unstitchable] = _rgba_bytes(UNSTITCHABLE_COLOUR)
+    rings = {r for m in maps for r in markers.get((m.net, m.layer), NO_MARKERS).rings}
+    for centre, radius in rings:
+        _draw_ring(rgba, grid, centre, radius)
     return rgba
 
 
 def write_overlays(
-    out_dir: Path, maps: Sequence[CoverageMap], distance: float
+    out_dir: Path,
+    grid: Grid,
+    maps: Sequence[CoverageMap],
+    markers: Mapping[MapKey, Markers],
+    distance: float,
+    style: HeatmapStyle,
 ) -> dict[str, Path]:
-    """One overlay PNG per copper layer that has stitched pours."""
+    """One overlay PNG per copper layer that has maps."""
     out_dir.mkdir(parents=True, exist_ok=True)
     by_layer: dict[str, list[CoverageMap]] = {}
     for m in maps:
         by_layer.setdefault(m.layer, []).append(m)
     paths = {}
     for layer, layer_maps in by_layer.items():
-        path = out_dir / f"pourstitch-{layer.replace('.', '_')}.png"
+        path = out_dir / f"{style.png_prefix}-{layer.replace('.', '_')}.png"
         matplotlib.image.imsave(
             path,
-            overlay_rgba(layer_maps, distance),
+            overlay_rgba(grid, layer_maps, markers, distance, style),
             dpi=OVERLAY_PPI,
             metadata=dict([OVERLAY_TAG]),
         )

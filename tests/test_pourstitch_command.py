@@ -132,7 +132,7 @@ def test_check_with_overlay_creates_only_the_image_commit(fakes, tmp_path: Path)
     assert board.calls == [
         "refill_zones",
         "begin_commit",
-        ("push_commit", overlay.OVERLAY_COMMIT),
+        ("push_commit", pourstitch_command.OVERLAY_COMMIT),
     ]
     assert len(created) == len(LAYERS)
     assert sorted(p.name for p in tmp_path.iterdir()) == [
@@ -151,7 +151,10 @@ def test_dry_run_still_places_overlay(fakes, tmp_path: Path):
     pourstitch_command.execute(OPTIONS, outputs, dry_run=True, kicad=KiCad(board))  # type: ignore[arg-type]
 
     assert [s.dry_run for s in placements] == [True]
-    assert board.calls == ["begin_commit", ("push_commit", overlay.OVERLAY_COMMIT)]
+    assert board.calls == [
+        "begin_commit",
+        ("push_commit", pourstitch_command.OVERLAY_COMMIT),
+    ]
     assert len(created) == len(LAYERS)
     assert (tmp_path / "heat.png").exists()
 
