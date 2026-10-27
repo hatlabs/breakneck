@@ -5,20 +5,24 @@
 Breakneck works on the board open in KiCad's PCB editor, through the KiCad IPC API. It has three jobs:
 
 - **Via placement.** `returnvia`, `padvia` and `pourstitch` place ground return vias, pad stitching vias and pour stitching vias. Every run is checked with KiCad's own DRC before anything is committed, and lands as one undoable step.
-- **Via visualisation.** `gndvia` draws lines from signal vias to their nearest return via when it is too far away, for placing vias by hand.
+- **Heatmaps.** `returnvia` and `pourstitch` show return distance and pour coverage as heatmaps, rendered to a file or placed on the board, for checking a layout and placing vias by hand.
 - **Manual neckdown.** `cut` splits tracks at footprint courtyards so custom rules can neck them down.
 
 ### Return vias
 
 A signal changing layers through a via also changes its reference plane, and its return current needs a ground via nearby to follow it. `returnvia` places a ground via within `--distance` (default 1.5 mm) of every via on a non-ground net that has none.
 
-Boards with isolated sections are supported: the ground net is chosen per via from the ground zones on the inner layers, so a via in a GND_ISO section gets a GND_ISO return. A via outside every ground zone is reported, not served.
+**Reference planes.** A via end is a copper layer the via connects on: a same-net track, pad or fill touches it there. A via that connects on fewer than two layers carries no layer change and is exempt. Each end's reference plane is the nearest other copper layer in stack order with a ground zone outline at the via, the upper one of two equally near layers. Ends on the same plane are measured once.
 
-The ground nets are the nets with zones on two or more inner layers. A board with no such net, such as a two-layer board or a stackup with one inner ground plane, uses the net named GND. Without a GND net, `returnvia` and `gndvia` stop before changing anything and ask for `--ground-nets`. Vias on ground nets never need a return.
+**Metric.** The return distance on a plane is the distance from the via's centre to the nearest return's centre through that plane's ground fill: a straight hop across the via's own antipad, then through the fill. Returns are the ground net's vias and through-hole pads with fill within reach of them. A return of GND does not serve a via whose plane is GND_ISO. A via end is served when its distance is at most `--distance` plus a 0.1 mm margin for the 0.1 mm raster. Paths on the raster run in eight directions, which overstates a straight run by up to about 8 % between them, so the effective straight-line limit depends on direction: about 1.46–1.65 mm at the default distance.
 
-![Stitching Vias](https://github.com/hatlabs/breakneck/blob/main/stitching-via-screenshot.png?raw=true)
+The planner still places vias by straight-line distance, while the log and the heatmaps use the distance through the plane. A planned via can therefore leave a via end unserved, for example across a slot in its plane; `returnvia --check` after the run shows those.
 
-The screenshot shows `gndvia` output: yellow lines from signal vias that lack a ground via within the distance.
+Boards with isolated sections are supported: the ground net is chosen per via from the ground zones on the inner layers, so a via in a GND_ISO section gets a GND_ISO return. A via end outside every ground zone is reported, not served. So is an end whose plane has no ground fill within `--distance` of the via.
+
+The ground nets are the nets with zones on two or more inner layers. A board with no such net, such as a two-layer board or a stackup with one inner ground plane, uses the net named GND. Without a GND net, `returnvia` stops before changing anything and asks for `--ground-nets`. Vias on ground nets never need a return.
+
+**Stackup assumption.** The plane next to a signal layer is taken to be a ground pour. In a SIG-GND-PWR-SIG stackup, B.Cu's real reference is the power plane on In2. With no ground zone on In2, B.Cu ends are measured on In1 instead. A board-wide low-priority GND zone under the power plane on In2 makes In2 the reference, but leaves B.Cu ends with no ground fill there, so every B.Cu end fails.
 
 ### Pad stitching vias
 
@@ -47,6 +51,8 @@ After these track cuts, custom rules apply to the expected track segments. The l
 Automatic re-healing of broken tracks is prevented by nudging the track widths by one nanometer, making adjacent
 tracks different widths.
 
+Breakneck's `cut` has basic support for filtering the affected tracks and components by layer, netclass or selection.
+
 ## Installation
 
 As a prerequisite, [install uv](https://docs.astral.sh/uv/getting-started/installation/).
@@ -57,7 +63,7 @@ To run breakneck without actually installing it:
 uvx breakneck <command> [options...]
 ```
 
-`padvia` and `gndvia` run on the base install. `returnvia` and `pourstitch` need the `place` extra (scipy, scikit-image and matplotlib):
+`padvia`, `cut` and `clear` run on the base install. `returnvia` and `pourstitch` need the `place` extra (scipy, scikit-image and matplotlib):
 
 ```
 uvx --from 'breakneck[place]' breakneck <command> [options...]
@@ -119,6 +125,7 @@ Notes:
 - **Other nets' pours** are not obstacles. They refill around the new vias, as in any KiCad layout.
 - **Project rules are read from disk.** DRC uses the saved `.kicad_pro` and `.kicad_dru`, so save rule and netclass changes before running. The board itself is read from the editor, unsaved changes included.
 - **kicad-cli** is taken from `--kicad-cli`, then from the running KiCad, then from `PATH`, then from the standard install locations.
+- **Set the zones' "Remove islands" to Never** before running `pourstitch` or `returnvia`. KiCad then keeps unconnected islands in the fill, so breakneck can place vias in them, and a spot over the main pour on one layer with only an island on the other passes the two-layer rule instead of dropping out, and stops showing grey in the `pourstitch` heatmap. Islands kept this way appear as isolated copper in DRC until they are stitched. Stitching only lowers that count, so the split check doesn't block the run.
 - **Runs add vias.** Every check counts the vias already on the board, so repeating a run adds nothing new. To remove a run's vias, undo it, or run `breakneck clear --vias` (below) to remove every stitching via not tied to a track or pad. KiCad 10 doesn't allow creating groups through the API, so a run's vias can't be grouped for selecting later.
 
 ### Clearing stitching vias
@@ -129,38 +136,24 @@ Notes:
 
 ### Dry runs
 
-`breakneck --dry-run <command>` plans, runs DRC, logs what it would place and writes `--render` output, but commits no vias or markers. The zone refill before planning still runs, and `--overlay` still places its images.
+`breakneck --dry-run <command>` plans, runs DRC, logs what it would place and writes `--render` output, but commits no vias or markers. The zone refill before planning still runs, and `--overlay` still places its images. The heatmaps include the planned vias: for `returnvia` they count as returns, except forced ones, so a dry run shows which via ends the run would leave unserved.
 
 ### Heatmaps
 
 `pourstitch --render PATH` writes a figure with one panel per net and layer, coloured by distance to the nearest stitching via, measured through the copper. Points beyond `--distance` are pink. Copper that no via could ever bring within `--distance` is grey: it is farther than that, through the net's copper on its layer, from every spot where a via could join the net's fill on two or more layers. Typical grey copper is a local zone on one layer whose other side is another net's pour, or the far end of such a zone joined to the main pour by a long neck. Other-net clearances are ignored for this, so a spot blocked only by other copper shows pink, not grey. Grey areas are left out of the uncovered area that `pourstitch` logs and are reported separately.
 
-`returnvia --render PATH` writes one panel per copper layer on which a via changing layers connects. The layer's copper is shown: every net's tracks, pads and pours, ground pours included, since a via placed anywhere in it would need its own return, and the ground vias. Other vias show only on layers where they have a measured end. Each pixel is coloured by the distance through its reference plane to the nearest ground return. The reference plane is the nearest other copper layer in stack order with a ground zone outline at that pixel, the same rule a via end uses. A via end shows its own measured return distance over the via and 0.3 mm past it, its antipad. Copper within the served threshold, `--distance` plus a 0.1 mm measuring margin, is dark grey-blue, lightening towards the threshold. Beyond it the colour steps to yellow and runs through matplotlib's `plasma_r` to dark blue at 3 × the threshold, and stays there farther out. Purple copper has no path to a return: it lies over a slot or void in its reference plane. Copper with no ground outline on any other layer has no reference plane and is left blank, such as a two-layer board's ground side. A pink ring of radius `--distance` marks each unserved via end on its own layer. Identical layers share a panel.
+`returnvia --render PATH` writes one panel per copper layer on which an unserved via end lies. By default each panel shows only the copper inside the rings around the unserved via ends, which picks out the problem vias. With nothing unserved, the figure is the board outline titled as such, and no overlay is placed. `--full-map` shows the copper of every layer on which a via changing layers connects: every net's tracks, pads and pours, ground pours included, since a via placed anywhere in it would need its own return, and the ground vias. Other vias show only on layers where they have a measured end. Each pixel is coloured by the distance through its reference plane to the nearest ground return. The reference plane is the nearest other copper layer in stack order with a ground zone outline at that pixel, the same rule a via end uses. A via end shows its own measured return distance over the via and over its net's copper in its antipad, the void around it in the reference plane, merged antipads included. Where antipads merge, the copper shows the worst of their distances. Another net's copper over the antipad stays purple: it has no return there. A signal through-hole pad shows the distance a via at its centre would have, over the pad and its clearance hole; pads are not reported unserved. Copper within the served threshold, `--distance` plus the 0.1 mm margin, is dark grey-blue, lightening towards the threshold. Beyond it the colour steps to yellow and runs through matplotlib's `plasma_r` to dark blue at 3 × the threshold, and stays there farther out. Purple copper has no path to a return: it lies over a slot or void in its reference plane. Copper with no ground outline on any other layer has no reference plane and is left blank, such as a two-layer board's ground side. A pink ring of radius `--distance` marks each unserved via end on its own layer. Identical layers share a panel.
 
 `returnvia` logs the number of exempt vias, which connect on fewer than two layers, and how many vias and via-plane returns are unserved. Set `LOGURU_LEVEL=DEBUG` to list each unserved via end with its distance or the reason it can't be served.
 
-`pourstitch --overlay [DIR]` and `returnvia --overlay [DIR]` write one transparent PNG per copper layer to DIR (default: the current directory) and place it on the board as a reference image, scaled and positioned to line up with the copper. The images go on User.1–User.4, one per copper layer in stack order, or on the layers given with `--overlay-layers`. Those layers must be enabled in Board Setup → Board Editor Layers. Each PNG carries its colourbar and label in a strip below the board outline. Toggle a layer's visibility to show or hide its heatmap, and remove them with `breakneck clear`. Both `clear` and a new `--overlay` replace only breakneck's own overlays, recognised by a `breakneck` text chunk in the PNG, also after the board outline has changed. Other reference images on those layers stay. Overlays placed by earlier breakneck versions carry no tag and are recognised only at their position and scale for the current board outline; after an outline change, delete those by hand.
+`pourstitch --overlay` and `returnvia --overlay` place one transparent image per copper layer on the board as a reference image, scaled and positioned to line up with the copper. The images go on User.1–User.4, one per copper layer in stack order, or on the layers given with `--overlay-layers`. Those layers must be enabled in Board Setup → Board Editor Layers. Each image carries its colourbar and label in a strip below the board outline. The board stores the images itself; the PNGs are written to a temporary directory and removed once placed. When they can't be placed, as in a dry run with the layers disabled, they stay there and the log lists their paths and placements. Toggle a layer's visibility to show or hide its heatmap, and remove them with `breakneck clear`. Both `clear` and a new `--overlay` replace only breakneck's own overlays, recognised by a `breakneck` text chunk in the PNG, also after the board outline has changed. Other reference images on those layers stay. Overlays placed by earlier breakneck versions carry no tag and are recognised only at their position and scale for the current board outline; after an outline change, delete those by hand.
 
-`pourstitch --check` and `returnvia --check` measure the existing vias only: no planning, no DRC and no vias. Combine them with `--overlay` or `--render` to see the current coverage:
+`pourstitch --check` and `returnvia --check` measure the existing vias only: no planning, no DRC and no vias. Combine them with `--render` or `--overlay` to see the current coverage. Every `--overlay` run commits its images and so adds an undo step. For repeated checks while placing vias by hand, use `--check --render` and keep the PNG open in an image viewer that reloads it; use `--overlay` for a one-off look on the board:
 
 ```bash
-breakneck pourstitch --nets GND +3.3V --check --overlay
 breakneck returnvia --check --render returnvia.png
+breakneck pourstitch --nets GND +3.3V --check --overlay
 ```
-
-### Visualising return vias
-
-`breakneck gndvia` draws lines on User.Eco2 from each via without a return via within `--distance` (default 1.5 mm) to the nearest return via of the ground at that location. It measures straight-line distance, not the distance through the reference plane that `returnvia` reports.
-
-It is possible to run `breakneck gndvia` repeatedly using `watch` to provide semi-real time updates while placing the GND vias:
-
-```bash
-watch -n 1 breakneck gndvia
-```
-
-**NOTE:** It turns out, every execution will bump the undo buffer, so until breakneck is made a bit smarter, it will become very difficult to undo any actual changes.
-
-Breakneck has basic support for filtering the affected tracks and components by layer, netclass or selection.
 
 ## Limitations
 

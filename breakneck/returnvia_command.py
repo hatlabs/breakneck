@@ -4,7 +4,7 @@ and overlay the return distance under the copper of each via end layer."""
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 import kipy
 import kipy.board
@@ -18,7 +18,7 @@ from shapely.ops import unary_union
 from breakneck import overlay, render
 from breakneck.placement import RunSettings, measure_only, run_placement
 from breakneck.plan import QUANTISATION, PlannedUnit
-from breakneck.raster import CoverageMap
+from breakneck.raster import BoolMap, CoverageMap, Grid
 from breakneck.returnpath import (
     NoBoardOutlineError,
     Outcome,
@@ -26,6 +26,7 @@ from breakneck.returnpath import (
     ReturnFields,
 )
 from breakneck.returnvia import (
+    ReferencePlane,
     ReturnViaOptions,
     ViaReferences,
     plan_return_vias,
@@ -33,7 +34,13 @@ from breakneck.returnvia import (
     resolve_ground_nets,
     via_references,
 )
-from breakneck.snapshot import Snapshot, Via, outline_from_edge_paths, read_edge_paths
+from breakneck.snapshot import (
+    PadKind,
+    Snapshot,
+    Via,
+    outline_from_edge_paths,
+    read_edge_paths,
+)
 
 COMMAND = "returnvia"
 OVERLAY_COMMIT = "breakneck returnvia overlay"
@@ -48,8 +55,7 @@ UNREACHABLE_COLOUR = "#b44dff"
 # Pink stands out on both ends of the palette and on the board.
 RING_COLOUR = "#ff2a6d"
 COPPER_MAP_NET = "copper"
-# Reach past a via's edge over its antipad, the void around it in the plane.
-ANTIPAD_REACH = 0.3
+SERVED_TITLE = "Return vias: every via end served within {distance:g} mm"
 # Whole steps per threshold, so the step at the threshold falls between two.
 PALETTE_STEPS_PER_DISTANCE = 256
 THRESHOLD = 1 / SCALE
@@ -157,24 +163,129 @@ def copper_maps(
     ]
 
 
-def paint_via_ends(
-    maps: Sequence[CoverageMap], results: Sequence[PlaneReturn], fields: ReturnFields
-) -> None:
-    """Show each measured via end's own distance on its layers: over the via,
-    and over the layer's copper on its antipad, which the plane's field leaves
-    as a void."""
-    grid = fields.grid
+@dataclasses.dataclass(frozen=True)
+class End:
+    """Copper that changes layers, by layer, with its return distance on one
+    reference plane and its void in that plane's fill, as a window and a
+    mask in it."""
+
+    net: str
+    copper: Mapping[str, BaseGeometry]
+    void: tuple[tuple[slice, slice], BoolMap]
+    distance: float
+
+
+# Whether an end with this copper can show on a map; None keeps every end.
+Shown = Callable[[Mapping[str, BaseGeometry]], bool] | None
+
+
+def via_ends(
+    results: Sequence[PlaneReturn], fields: ReturnFields, distance: float, shown: Shown
+) -> list[End]:
+    """The measured via ends, each on the layers referencing its plane."""
     diameters = {(v.position, v.net): v.diameter for v in fields.snapshot.vias}
-    for m in maps:
-        for r in results:
-            if m.layer not in r.layers or r.outcome is not Outcome.MEASURED:
+    out = []
+    for r in results:
+        if r.outcome is not Outcome.MEASURED:
+            continue
+        assert r.plane is not None
+        via = Point(r.position).buffer(diameters[(r.position, r.net)] / 2)
+        copper = {L: via for L in r.layers}
+        if shown is not None and not shown(copper):
+            continue
+        void = fields.void(r.position, r.plane, distance)
+        assert void is not None
+        out.append(End(r.net, copper, void, r.distance))
+    return out
+
+
+def pad_ends(
+    layers: Sequence[str],
+    fields: ReturnFields,
+    grounds: Sequence[str],
+    distance: float,
+    shown: Shown,
+) -> list[End]:
+    """Signal PTH pads on `layers`, one end per reference plane, measured as
+    a via end there would be. They are shown but never reported unserved."""
+    snap = fields.snapshot
+    outlines = {L: list(reference_outlines(snap, L, grounds)) for L in layers}
+    out = []
+    for p in snap.pads:
+        if p.kind is not PadKind.PTH or not p.net or p.net in grounds:
+            continue
+        at = Point(p.position)
+        by_plane: dict[ReferencePlane, dict[str, BaseGeometry]] = {}
+        for L in layers:
+            plane = next((pl for pl, o in outlines[L] if o.contains(at)), None)
+            if L in p.shapes and plane is not None:
+                by_plane.setdefault(plane, {})[L] = p.shapes[L]
+        for plane, copper in by_plane.items():
+            if shown is not None and not shown(copper):
                 continue
-            radius = diameters[(r.position, r.net)] / 2
-            via = Point(r.position).buffer(radius)
-            antipad = Point(r.position).buffer(radius + ANTIPAD_REACH)
-            win = grid.bounds_window(antipad.bounds)
-            on_copper = grid.mask(antipad, win) & ~np.isnan(m.distance[win])
-            m.distance[win][on_copper | grid.mask(via, win)] = r.distance
+            found = fields.distance_at(p.position, plane, distance)
+            if found is None:
+                continue
+            void = fields.void(p.position, plane, distance)
+            assert void is not None
+            out.append(End(p.net, copper, void, found))
+    return out
+
+
+def near_rings(marks: Mapping[render.MapKey, render.Markers], distance: float) -> Shown:
+    """Whether an end can reach into a ring on one of its layers: its void
+    lies within `distance` of its copper."""
+    rings: dict[str, BaseGeometry] = {}
+    for (_, layer), mk in marks.items():
+        if mk.rings:
+            rings[layer] = unary_union([Point(c).buffer(r) for c, r in mk.rings])
+
+    def shown(copper: Mapping[str, BaseGeometry]) -> bool:
+        return any(
+            L in rings and geom.distance(rings[L]) <= distance
+            for L, geom in copper.items()
+        )
+
+    return shown
+
+
+def net_copper(snapshot: Snapshot, net: str, layer: str) -> BaseGeometry:
+    """`net`'s tracks, pads, vias and fill on `layer`."""
+    shapes = [t.geometry for t in snapshot.tracks if t.net == net and t.layer == layer]
+    shapes += [
+        p.shapes[layer] for p in snapshot.pads if p.net == net and layer in p.shapes
+    ]
+    shapes += [
+        Point(v.position).buffer(v.diameter / 2) for v in snapshot.vias if v.net == net
+    ]
+    shapes.append(snapshot.fill(net, layer))
+    return unary_union(shapes)
+
+
+def paint_ends(m: CoverageMap, fields: ReturnFields, ends: Sequence[End]) -> None:
+    """Show each end's distance on `m`'s layer over its copper and over its
+    net's copper in its void that the plane's field leaves unreachable.
+    Other copper keeps its reading: a return's own copper the field reaches,
+    or another net's track over the void, which has no return there. Where
+    voids overlap, the worst end wins. The end's own copper goes on top, so
+    a neighbour's void never covers it."""
+    grid = fields.grid
+    here = [e for e in ends if m.layer in e.copper]
+    lost = np.isinf(m.distance)
+    worst = np.full(grid.shape, -np.inf)
+    nets: dict[str, BoolMap] = {}
+    for e in here:
+        if e.net not in nets:
+            nets[e.net] = grid.touching(net_copper(fields.snapshot, e.net, m.layer))
+        win, void = e.void
+        own = void & lost[win] & nets[e.net][win]
+        worst[win][own] = np.maximum(worst[win][own], e.distance)
+    painted = worst > -np.inf
+    m.distance[painted] = worst[painted]
+    for e in here:
+        copper = e.copper[m.layer]
+        win = grid.bounds_window(copper.bounds)
+        m.distance[win][grid.mask(copper, win)] = e.distance
 
 
 def markers(
@@ -191,6 +302,24 @@ def markers(
         (m.net, m.layer): render.Markers(rings=tuple(rings.get(m.layer, ())))
         for m in maps
     }
+
+
+def ring_maps(
+    maps: Sequence[CoverageMap],
+    marks: Mapping[render.MapKey, render.Markers],
+    grid: Grid,
+) -> list[CoverageMap]:
+    """The maps cut to the copper inside their rings, which picks out the
+    unserved via ends; a map with no ring is dropped."""
+    out = []
+    for m in maps:
+        rings = marks[(m.net, m.layer)].rings
+        if not rings:
+            continue
+        inside = grid.mask(unary_union([Point(c).buffer(r) for c, r in rings]))
+        m.distance[~inside] = np.nan
+        out.append(m)
+    return out
 
 
 def log_results(
@@ -228,21 +357,21 @@ def execute(
     check: bool = False,
     kicad_cli: str | None = None,
     allow_splits: bool = False,
+    full_map: bool = False,
     kicad: kipy.KiCad | None = None,
 ) -> None:
     """Run returnvia against the open board.
 
     `check` only measures the existing returns: no planning, no kicad-cli,
     no vias or markers. Planned vias count as returns in the measurement,
-    except forced ones. Overlays are placed in their own commit, also in a
-    dry run.
+    except forced ones. The heatmaps show only the copper around unserved
+    via ends, or with `full_map` all copper. Overlays are placed in their
+    own commit, also in a dry run.
     """
     kicad = kicad or kipy.KiCad()
     board = kicad.get_board()
     check_outline(board)
-    place_overlay = outputs.overlay_dir is not None and overlay.overlay_ready(
-        board, outputs, dry_run
-    )
+    place_overlay = outputs.overlay and overlay.overlay_ready(board, outputs, dry_run)
 
     if check:
         snapshot, plan = measure_only(kicad, board)
@@ -263,26 +392,53 @@ def execute(
     log_results(references, results, options.distance)
 
     maps = copper_maps(fields, references, grounds)
-    paint_via_ends(maps, results, fields)
     marks = markers(results, maps, options.distance)
+    shown = None if full_map else near_rings(marks, options.distance)
+    ends = [
+        *pad_ends([m.layer for m in maps], fields, grounds, options.distance, shown),
+        *via_ends(results, fields, options.distance, shown),
+    ]
+    for m in maps:
+        paint_ends(m, fields, ends)
     if not maps:
         logger.info("No signal via changes layers: no heatmaps")
-    elif outputs.render is not None:
-        render.render_panels(
-            outputs.render,
-            fields.snapshot,
-            fields.grid,
-            maps,
-            marks,
-            options.distance,
-            STYLE,
-        )
+    elif not full_map:
+        maps = ring_maps(maps, marks, fields.grid)
+        if not maps:
+            logger.info("No unserved via ends: no heatmaps")
+    if outputs.render is not None:
+        if maps:
+            render.render_panels(
+                outputs.render,
+                fields.snapshot,
+                fields.grid,
+                maps,
+                marks,
+                options.distance,
+                STYLE,
+            )
+        else:
+            # Replaces the previous run's heatmap, which would show stale rings.
+            render.render_outline(
+                outputs.render,
+                fields.snapshot,
+                fields.grid,
+                SERVED_TITLE.format(distance=options.distance),
+            )
         logger.info(f"Wrote {outputs.render}")
 
-    if outputs.overlay_dir is not None:
-        pngs = render.write_overlays(
-            outputs.overlay_dir, fields.grid, maps, marks, options.distance, STYLE
-        )
+    if outputs.overlay:
         overlay.show_overlays(
-            board, pngs, snapshot, outputs, place_overlay, OVERLAY_COMMIT
+            board,
+            (
+                lambda out_dir: render.write_overlays(
+                    out_dir, fields.grid, maps, marks, options.distance, STYLE
+                )
+            )
+            if maps
+            else None,
+            snapshot,
+            outputs,
+            place_overlay,
+            OVERLAY_COMMIT,
         )

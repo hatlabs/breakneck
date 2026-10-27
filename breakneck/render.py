@@ -18,6 +18,7 @@ import matplotlib.image
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
+from matplotlib.axes import Axes
 from matplotlib.patches import Circle
 from matplotlib.transforms import Bbox
 from PIL import Image
@@ -169,6 +170,32 @@ def panel_markers(
     return Markers(out.rings, out.dots, tuple(c for c in out.crosses if c[0] in layers))
 
 
+def _board_axes(ax: Axes, snapshot: Snapshot, grid: Grid, title: str) -> None:
+    """The board outline, the panel's limits and its title."""
+    x0, y0 = grid.x0, grid.y0
+    x1, y1 = x0 + grid.width * grid.pixel, y0 + grid.height * grid.pixel
+    outline = snapshot.board_outline
+    for poly in getattr(outline, "geoms", [outline]):
+        ax.plot(*poly.exterior.xy, color=OUTLINE_COLOUR, lw=0.8)
+    ax.set_xlim(x0 - MARGIN_MM, x1 + MARGIN_MM)
+    ax.set_ylim(y1 + MARGIN_MM, y0 - MARGIN_MM)
+    ax.set_title(title, color="white")
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+
+def render_outline(path: Path, snapshot: Snapshot, grid: Grid, title: str) -> None:
+    """One panel with only the board outline, for a run with nothing to map."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    aspect = grid.height / grid.width
+    fig, ax = plt.subplots(figsize=(PANEL_INCHES, PANEL_INCHES * aspect + 1))
+    fig.patch.set_facecolor(BACKGROUND)
+    ax.set_facecolor(BACKGROUND)
+    _board_axes(ax, snapshot, grid, title)
+    fig.savefig(path, dpi=PANEL_DPI, facecolor=fig.get_facecolor(), bbox_inches="tight")
+    plt.close(fig)
+
+
 def render_panels(
     path: Path,
     snapshot: Snapshot,
@@ -247,17 +274,10 @@ def render_panels(
                 ms=CROSS_SIZE,
                 mew=CROSS_LINE_WIDTH,
             )
-        outline = snapshot.board_outline
-        for poly in getattr(outline, "geoms", [outline]):
-            ax.plot(*poly.exterior.xy, color=OUTLINE_COLOUR, lw=0.8)
-        ax.set_xlim(x0 - MARGIN_MM, x1 + MARGIN_MM)
-        ax.set_ylim(y1 + MARGIN_MM, y0 - MARGIN_MM)
         title = f"{m.net} on {m.layer}" + (
             f" ({', '.join(twins)} identical)" if twins else ""
         )
-        ax.set_title(title, color="white")
-        ax.set_xticks([])
-        ax.set_yticks([])
+        _board_axes(ax, snapshot, grid, title)
     assert image is not None
     cb = fig.colorbar(
         image,

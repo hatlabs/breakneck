@@ -1,11 +1,8 @@
-import argparse
 import math
 import sys
 from dataclasses import replace
 
-import kipy.board_types
 import pytest
-from kipy.proto.board.board_types_pb2 import BoardLayer
 from shapely.geometry import LineString, Point, box
 
 from breakneck import cli, returnvia_command
@@ -22,7 +19,6 @@ from breakneck.returnvia import (
     ReturnViaOptions,
     plan_return_vias,
     resolve_ground_nets,
-    return_lines,
     unserved_vias,
     via_references,
 )
@@ -411,7 +407,7 @@ def test_one_forced_via_serves_a_nearby_crowded_via_too():
     assert not result.unfixable
 
 
-def test_planned_returns_satisfy_the_gndvia_check():
+def test_planned_returns_satisfy_the_straight_line_check():
     # A keep-off around the via leaves room only on the outermost ring, where
     # rounding to 1 µm would push this off-grid position past the distance.
     centre = (10.0006, 10)
@@ -426,7 +422,7 @@ def test_planned_returns_satisfy_the_gndvia_check():
     }
 
 
-def test_gndvia_reports_exactly_the_vias_returnvia_serves():
+def test_planner_acts_on_exactly_the_unserved_vias():
     zones = [zone("GND", INNER, GND_AREA), zone("GND_ISO", INNER, box(20, 0, 30, 20))]
     served = via("SERVED", 5, 5)
     needs = via("NEEDS", 10, 10)
@@ -448,30 +444,6 @@ def test_gndvia_reports_exactly_the_vias_returnvia_serves():
 
     assert reported == {"NEEDS", "ISO", "OUTSIDE"}
     assert reported == acted_on
-
-
-def test_gndvia_lines_go_to_the_nearest_return_of_the_local_ground():
-    zones = [zone("GND", INNER, GND_AREA), zone("GND_ISO", INNER, ISO_AREA)]
-    snap = snapshot(
-        vias=[
-            via("ISO", 25, 10),
-            via("GND", 19, 10),  # nearer, but the wrong ground
-            via("GND_ISO", 28, 10),
-            via("GND_ISO", 35, 10),
-        ],
-        zones=zones,
-    )
-    lines, markers = return_lines(snap, None, 1.5)
-    assert lines == [((25, 10), (28, 10))]
-    assert markers == []
-
-
-def test_gndvia_marks_vias_without_a_ground_or_a_return():
-    zones = [zone("GND", INNER, GND_AREA)]
-    snap = snapshot(vias=[via("A", 10, 10), via("B", 35, 10)], zones=zones)
-    lines, markers = return_lines(snap, None, 1.5)
-    assert lines == []
-    assert sorted(markers) == [(10, 10), (35, 10)]
 
 
 TWO_LAYERS = ("F.Cu", "B.Cu")
@@ -520,22 +492,6 @@ def test_no_ground_net_found_is_an_error():
         plan(snap)
 
 
-def test_gndvia_without_a_ground_exits_before_any_board_change(monkeypatch):
-    board = _RecordingBoard([])
-    snap = two_layer_snapshot(vias=[via("SIG", 5, 5)])
-    monkeypatch.setattr(
-        cli.kipy, "KiCad", lambda: type("K", (), {"get_board": lambda self: board})()
-    )
-    monkeypatch.setattr(cli.Snapshot, "from_board", staticmethod(lambda b: snap))
-
-    args = argparse.Namespace(distance=1.5, ground_nets=None, dry_run=False)
-    with pytest.raises(SystemExit) as exit_info:
-        cli.execute_gndvia_check(args)
-
-    assert exit_info.value.code == 1
-    assert board.calls == []
-
-
 def test_returnvia_without_a_ground_exits_with_an_error(monkeypatch):
     snap = two_layer_snapshot(vias=[via("SIG", 5, 5)])
     monkeypatch.setattr(
@@ -561,9 +517,13 @@ def _parse(monkeypatch, *argv):
     return cli.parse_args()
 
 
-def test_gndvia_and_returnvia_share_the_default_distance(monkeypatch):
-    assert _parse(monkeypatch, "gndvia").distance == 1.5
+def test_returnvia_default_distance(monkeypatch):
     assert _parse(monkeypatch, "returnvia").distance == 1.5
+
+
+def test_gndvia_is_an_unknown_command(monkeypatch):
+    with pytest.raises(SystemExit):
+        _parse(monkeypatch, "gndvia")
 
 
 def test_returnvia_arguments(monkeypatch):
@@ -586,59 +546,6 @@ def test_returnvia_arguments(monkeypatch):
 def test_returnvia_rejects_malformed_via_size(monkeypatch, bad):
     with pytest.raises(SystemExit):
         _parse(monkeypatch, "returnvia", "--via", bad)
-
-
-class _RecordingBoard:
-    def __init__(self, shapes):
-        self.shapes = shapes
-        self.calls = []
-        self.created = []
-
-    def get_shapes(self):
-        return self.shapes
-
-    def begin_commit(self):
-        self.calls.append("begin_commit")
-
-    def remove_items(self, items):
-        self.calls.append(("remove_items", len(items)))
-
-    def create_items(self, items):
-        self.calls.append("create_items")
-        self.created += items
-
-    def push_commit(self, commit):
-        self.calls.append("push_commit")
-
-    def drop_commit(self, commit):
-        self.calls.append("drop_commit")
-
-
-@pytest.mark.parametrize("dry_run", [False, True])
-def test_gndvia_draws_eco2_lines_in_board_coordinates(monkeypatch, dry_run):
-    old = kipy.board_types.BoardSegment()
-    old.layer = BoardLayer.BL_Eco2_User
-    board = _RecordingBoard([old])
-    snap = snapshot(vias=[via("SIG", 10, 10), via("GND", 12, 11), via("X", 35, 5)])
-    monkeypatch.setattr(
-        cli.kipy, "KiCad", lambda: type("K", (), {"get_board": lambda self: board})()
-    )
-    monkeypatch.setattr(cli.Snapshot, "from_board", staticmethod(lambda b: snap))
-
-    args = argparse.Namespace(distance=1.5, ground_nets=["GND"], dry_run=dry_run)
-    cli.execute_gndvia_check(args)
-
-    assert board.calls == [
-        "begin_commit",
-        ("remove_items", 1),
-        "create_items",
-        "drop_commit" if dry_run else "push_commit",
-    ]
-    line, *marker = board.created
-    assert (line.start.x, line.start.y) == (10_000_000, 10_000_000)
-    assert (line.end.x, line.end.y) == (12_000_000, 11_000_000)
-    assert all(s.layer == BoardLayer.BL_Eco2_User for s in board.created)
-    assert marker  # the via outside every GND zone
 
 
 # ---- reference planes ----------------------------------------------------------
