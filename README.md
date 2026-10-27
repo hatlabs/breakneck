@@ -119,7 +119,13 @@ Notes:
 - **Other nets' pours** are not obstacles. They refill around the new vias, as in any KiCad layout.
 - **Project rules are read from disk.** DRC uses the saved `.kicad_pro` and `.kicad_dru`, so save rule and netclass changes before running. The board itself is read from the editor, unsaved changes included.
 - **kicad-cli** is taken from `--kicad-cli`, then from the running KiCad, then from `PATH`, then from the standard install locations.
-- **Runs add vias.** Every check counts the vias already on the board, so repeating a run adds nothing new. Undo is the way to remove a run's vias: KiCad 10 doesn't allow creating groups through the API, so they can't be grouped for selecting later.
+- **Runs add vias.** Every check counts the vias already on the board, so repeating a run adds nothing new. To remove a run's vias, undo it, or run `breakneck clear --vias` (below) to remove every stitching via not tied to a track or pad. KiCad 10 doesn't allow creating groups through the API, so a run's vias can't be grouped for selecting later.
+
+### Clearing stitching vias
+
+`breakneck clear --vias` removes stitching vias along with the markers and overlays, so `pourstitch` and `returnvia` can place a fresh set after layout changes. A via goes when it touches a fill of its own net on at least one layer and no track or pad of its net touches it. Vias in pads, fanout vias at the end of a track and locked vias stay. `--nets NET [NET ...]` limits the removal to those nets; by default every net with a zone is cleared. The removal is one undo step, followed by a zone refill. With `--dry-run` it logs how many vias per net would go and removes nothing.
+
+**This removes every via touching a pour of its own net that no track or pad ties down, including vias placed by hand.** That includes fanout vias tied to a pad only through a pour, and vias that are the only link between two pours of the same net. To keep such a via, connect it with a short track or lock it. To restore a board after clearing, run `clear --vias`, then `padvia --nets NET [NET ...]` (it re-adds a via with a stub track for each SMD pad, and the stubs keep those vias through later clears), then `returnvia`, then `pourstitch`, which restitches overlapping pours. As above, `pourstitch` goes last.
 
 ### Dry runs
 
