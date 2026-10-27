@@ -201,17 +201,6 @@ def test_returnvia_failure_exits_cleanly(monkeypatch, error):
     assert exit_info.value.code == 1
 
 
-def test_pourstitch_without_nets_stitches_every_net_of_the_class(monkeypatch):
-    seen = []
-    monkeypatch.setattr(
-        pourstitch_command, "execute", lambda options, *a, **kw: seen.append(options)
-    )
-
-    cli.execute_pourstitch(parsed(monkeypatch, ["pourstitch"]))
-
-    assert seen[0].nets is None
-
-
 def pourstitch_options(monkeypatch, argv):
     seen = []
     monkeypatch.setattr(
@@ -220,6 +209,10 @@ def pourstitch_options(monkeypatch, argv):
     cli.execute_pourstitch(parsed(monkeypatch, argv))
     (options,) = seen
     return options
+
+
+def test_pourstitch_without_nets_leaves_net_selection_unset(monkeypatch):
+    assert pourstitch_options(monkeypatch, ["pourstitch"]).nets is None
 
 
 @pytest.mark.parametrize(

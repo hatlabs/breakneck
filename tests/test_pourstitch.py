@@ -279,7 +279,7 @@ def _two_net_snapshot():
     )
 
 
-def test_without_nets_every_net_with_pours_on_two_layers_is_stitched(log):
+def test_without_nets_every_ground_net_with_pours_on_two_layers_is_stitched(log):
     snap = _two_net_snapshot()
 
     plan = PourStitcher()(snap, Options(nets=None, distance=D), [])
@@ -500,6 +500,7 @@ def test_plain_run_stitches_only_the_ground_net_on_its_lattice(log):
         "stitched at 3 mm: GND" in m
         for m in log
     )
+    assert not [m for m in log if "skipping" in m]
 
 
 def test_power_run_stitches_only_the_power_net_on_its_lattice(log):
@@ -519,6 +520,7 @@ def test_power_run_stitches_only_the_power_net_on_its_lattice(log):
         "stitched at 10 mm: +3.3V" in m
         for m in log
     )
+    assert not [m for m in log if "skipping" in m]
 
 
 def finger_power_snapshot():
