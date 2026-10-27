@@ -182,6 +182,7 @@ def render_panels(
     shown = panels(maps)
     if not shown:
         return
+    path.parent.mkdir(parents=True, exist_ok=True)
     rows = math.ceil(len(shown) / PANEL_COLUMNS)
     cols = min(PANEL_COLUMNS, len(shown))
     x0, y0 = grid.x0, grid.y0

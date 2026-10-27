@@ -348,3 +348,12 @@ def test_run_without_maps_removes_the_previous_overlays(fakes, tmp_path: Path):
         "remove_items",
         ("push_commit", pourstitch_command.OVERLAY_COMMIT),
     ]
+
+
+def test_render_creates_the_missing_parent_directory(fakes, tmp_path: Path):
+    path = tmp_path / "out" / "heat.png"
+    outputs = overlay.Outputs(render=path)
+
+    pourstitch_command.execute(OPTIONS, outputs, check=True, kicad=KiCad(Board()))  # type: ignore[arg-type]
+
+    assert path.exists()

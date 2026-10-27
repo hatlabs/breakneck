@@ -565,3 +565,12 @@ def test_no_ground_fill_end_is_logged_and_ringed(fakes, log, tmp_path: Path):
     on_ring = (SIG[0] - DISTANCE, SIG[1])
     assert at(rgba(tmp_path / "returnvia-In1_Cu.png"), on_ring) == WHITE
     assert at(rgba(tmp_path / "returnvia-In2_Cu.png"), on_ring) != WHITE
+
+
+def test_render_creates_the_missing_parent_directory(fakes, tmp_path: Path):
+    fakes.snap = slotted((SIG[0] + 1.4, SIG[1]))
+    path = tmp_path / "out" / "heat.png"
+
+    run(Board(), render=path)
+
+    assert path.exists()
