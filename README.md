@@ -32,7 +32,16 @@ The ground nets are the nets with zones on two or more inner layers. A board wit
 
 With Manhattan routing, outer-layer pours break up into narrow fingers. A regular grid of stitching vias misses many of them, and an unstitched finger connected at one end can act as an antenna.
 
-`pourstitch --distance D` makes every point of each net's pours lie within D (default 2.5 mm) of a stitching via, measuring distance through the copper rather than in a straight line. A finger whose tip is 2 mm from a via across a gap, but 8 mm away along the copper, counts as 8 mm. By default it stitches every net with pours on two or more copper layers; a net whose zones are all on one layer has nothing to stitch and is skipped. `--nets GND +3.3V` limits it to the listed nets.
+`pourstitch` makes every point of a net's pours lie within a distance D of a stitching via, measuring distance through the copper rather than in a straight line. A finger whose tip is 2 mm from a via across a gap, but 8 mm away along the copper, counts as 8 mm. Each run stitches one class of nets at one distance:
+
+- `pourstitch` stitches the ground nets at 3 mm. They are found the same way as for `returnvia` (see above), and `--ground-nets` overrides the detection the same way. Without a ground net, the run stops before changing anything and asks for `--ground-nets`.
+- `pourstitch --power` stitches every other net at 10 mm, power pours and pours of signal nets alike. On a board without a ground net, it logs that and stitches every net.
+
+`--distance D` replaces the class's distance for every net in the run. Only nets with pours on two or more copper layers are stitched; a net whose zones are all on one layer has nothing to stitch and is skipped. `--nets GND GND_ISO` limits the run to the listed nets of its class. A listed net of the other class is skipped with a warning, so `pourstitch --nets GND +3.3V` stitches only GND, and +3.3V needs a `--power` run. The log names the class, its distance and the nets it stitches.
+
+Power pours are stitched sparsely. They need vias to join their layers, to carry their DC current and to reach their extremities, and a 10 mm distance gives that. More power vias cost more than they give: each one cuts an antipad into the ground planes it passes through, and each one is a via on a non-ground net that needs its own ground return. Where a power pour carries high current, check that it has enough vias for it and add more by hand.
+
+Ground pours are stitched densely, so that the ground layers act as one reference and no ground finger is left to act as an antenna. At 3 mm the lattice pitch is about 4.2 mm, which is λ/20 at about 1.7 GHz in FR-4. That is not dense enough for RF: around an RF section, such as the surroundings of a 2.4 GHz module and its antenna feed, add ground vias by hand.
 
 It rasterises the pours at 0.1 mm, places vias on a square lattice of pitch D·√2, then fills the remaining gaps one at a time, starting with the point farthest from any via. Narrow spots get a smaller fallback via. `--render` and `--overlay` show the result as heatmaps (see below).
 
@@ -92,8 +101,9 @@ Run `breakneck -h`, or `breakneck <command> -h`, to see the available options.
 ### Placing vias
 
 ```bash
-breakneck returnvia
 breakneck padvia
+breakneck pourstitch --power
+breakneck returnvia
 breakneck pourstitch --overlay
 ```
 
@@ -116,7 +126,13 @@ Other nets' pours are not obstacles, so a single via can cut a narrow neck of an
 
 `returnvia --force` adds a second pass: every via still without a return gets one at the spot with the most clearance, never overlapping other-net copper. These vias may violate clearance. They survive the DRC check despite that, and get a marker so you can fix them by hand. A forced via is a placeholder that may lie outside the ground fill, so it serves nothing: the run's log and heatmaps still count its via as unserved. Other vias of the same ground net within `--distance` of it in a straight line get no forced via of their own; they are reported unfixable with "relies on forced via at (x, y)" and get an X. After moving it, refill the zones and run `returnvia --check` to confirm. Via ends outside every ground zone, or with no ground fill near the via, are never forced.
 
-Run `pourstitch` last. Vias placed by `returnvia` or `padvia` punch holes in other nets' pours and can create new narrow spots.
+After `padvia`, stitch the pours in three steps, with checks by hand between them:
+
+1. `pourstitch --power`. Look at the result with `--check --render` or `--overlay`, and add vias by hand at the extremities of power pours that are still uncovered.
+2. `returnvia`. It gives every via on a non-ground net a return, the power stitching vias from step 1 included. Fix the vias it reports by hand, refill the zones and confirm with `returnvia --check`.
+3. `pourstitch`. It counts the return vias already on the board as ground stitches, so it adds ground vias only where they leave gaps.
+
+Power stitching goes first because its vias need returns, and ground stitching goes last because the return vias count towards it. Every via placed punches a hole in other nets' pours and can create new narrow spots, so after later hand edits, repeat the `--check` runs.
 
 Notes:
 
@@ -132,7 +148,7 @@ Notes:
 
 `breakneck clear --vias` removes stitching vias along with the markers and overlays, so `pourstitch` and `returnvia` can place a fresh set after layout changes. A via goes when it touches a fill of its own net on at least one layer and no track or pad of its net touches it. Vias in pads, fanout vias at the end of a track and locked vias stay. `--nets NET [NET ...]` limits the removal to those nets; by default every net with a zone is cleared. The removal is one undo step, followed by a zone refill. With `--dry-run` it logs how many vias per net would go and removes nothing.
 
-**This removes every via touching a pour of its own net that no track or pad ties down, including vias placed by hand.** That includes fanout vias tied to a pad only through a pour, and vias that are the only link between two pours of the same net. To keep such a via, connect it with a short track or lock it. To restore a board after clearing, run `clear --vias`, then `padvia` (it re-adds a via with a stub track for each SMD pad, and the stubs keep those vias through later clears), then `returnvia`, then `pourstitch`, which restitches overlapping pours. As above, `pourstitch` goes last.
+**This removes every via touching a pour of its own net that no track or pad ties down, including vias placed by hand.** That includes fanout vias tied to a pad only through a pour, and vias that are the only link between two pours of the same net. To keep such a via, connect it with a short track or lock it. To restore a board after clearing, run `clear --vias`, then `padvia` (it re-adds a via with a stub track for each SMD pad, and the stubs keep those vias through later clears), then the three stitching steps above: `pourstitch --power`, `returnvia` and `pourstitch`.
 
 ### Dry runs
 
@@ -140,7 +156,7 @@ Notes:
 
 ### Heatmaps
 
-`pourstitch --render PATH` writes a figure with one panel per net and layer, coloured by distance to the nearest stitching via, measured through the copper. Points beyond `--distance` are pink. Copper that no via could ever bring within `--distance` is grey: it is farther than that, through the net's copper on its layer, from every spot where a via could join the net's fill on two or more layers. Typical grey copper is a local zone on one layer whose other side is another net's pour, or the far end of such a zone joined to the main pour by a long neck. Other-net clearances are ignored for this, so a spot blocked only by other copper shows pink, not grey. Grey areas are left out of the uncovered area that `pourstitch` logs and are reported separately.
+`pourstitch --render PATH` writes a figure with one panel per net and layer for the nets of the run's class, coloured by distance to the nearest stitching via, measured through the copper. Points beyond the run's distance, the class's default or `--distance`, are pink. Copper that no via could ever bring within that distance is grey: it is farther than that, through the net's copper on its layer, from every spot where a via could join the net's fill on two or more layers. Typical grey copper is a local zone on one layer whose other side is another net's pour, or the far end of such a zone joined to the main pour by a long neck. Other-net clearances are ignored for this, so a spot blocked only by other copper shows pink, not grey. Grey areas are left out of the uncovered area that `pourstitch` logs and are reported separately.
 
 `returnvia --render PATH` writes one panel per copper layer on which an unserved via end lies. By default each panel shows only the copper inside the rings around the unserved via ends, which picks out the problem vias. With nothing unserved, the figure is the board outline titled as such, and no overlay is placed. `--full-map` shows the copper of every layer on which a via changing layers connects: every net's tracks, pads and pours, ground pours included, since a via placed anywhere in it would need its own return, and the ground vias. Other vias show only on layers where they have a measured end. Each pixel is coloured by the distance through its reference plane to the nearest ground return. The reference plane is the nearest other copper layer in stack order with a ground zone outline at that pixel, the same rule a via end uses. A via end shows its own measured return distance over the via and over its net's copper in its antipad, the void around it in the reference plane, merged antipads included. Where antipads merge, the copper shows the worst of their distances. Another net's copper over the antipad stays purple: it has no return there. A signal through-hole pad shows the distance a via at its centre would have, over the pad and its clearance hole; pads are not reported unserved. Copper within the served threshold, `--distance` plus the 0.1 mm margin, is dark grey-blue, lightening towards the threshold. Beyond it the colour steps to yellow and runs through matplotlib's `plasma_r` to dark blue at 3 × the threshold, and stays there farther out. Purple copper has no path to a return: it lies over a slot or void in its reference plane. Copper with no ground outline on any other layer has no reference plane and is left blank, such as a two-layer board's ground side. A pink ring of radius `--distance` marks each unserved via end on its own layer. Identical layers share a panel.
 
@@ -152,7 +168,8 @@ Notes:
 
 ```bash
 breakneck returnvia --check --render returnvia.png
-breakneck pourstitch --nets GND +3.3V --check --overlay
+breakneck pourstitch --power --check --render power.png
+breakneck pourstitch --check --overlay
 ```
 
 ## Limitations
