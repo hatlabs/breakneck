@@ -34,7 +34,13 @@ from breakneck.returnvia import (
     resolve_ground_nets,
     via_references,
 )
-from breakneck.snapshot import Snapshot, Via, outline_from_edge_paths, read_edge_paths
+from breakneck.snapshot import (
+    PadKind,
+    Snapshot,
+    Via,
+    outline_from_edge_paths,
+    read_edge_paths,
+)
 
 COMMAND = "returnvia"
 OVERLAY_COMMIT = "breakneck returnvia overlay"
@@ -166,29 +172,65 @@ def antipad(
     return copper.buffer(fill.distance(copper))
 
 
-def paint_via_ends(
-    maps: Sequence[CoverageMap], results: Sequence[PlaneReturn], fields: ReturnFields
-) -> None:
-    """Show each measured via end's own distance on its layers: over the via,
-    and over the layer's copper on its antipad. The vias go on top, so a
-    neighbour's antipad never covers one."""
-    grid = fields.grid
+@dataclasses.dataclass(frozen=True)
+class End:
+    """Copper that changes layers, its clearance hole in the reference
+    plane and its return distance."""
+
+    copper: BaseGeometry
+    hole: BaseGeometry
+    distance: float
+
+
+def via_ends(
+    layer: str, results: Sequence[PlaneReturn], fields: ReturnFields
+) -> list[End]:
+    """The measured via ends on `layer`."""
     diameters = {(v.position, v.net): v.diameter for v in fields.snapshot.vias}
-    for m in maps:
-        ends = [
-            (r, Point(r.position).buffer(diameters[(r.position, r.net)] / 2))
-            for r in results
-            if m.layer in r.layers and r.outcome is Outcome.MEASURED
-        ]
-        for r, via in ends:
-            assert r.plane is not None
-            hole = antipad(fields, via, r.plane)
-            win = grid.bounds_window(hole.bounds)
-            on_copper = grid.mask(hole, win) & ~np.isnan(m.distance[win])
-            m.distance[win][on_copper] = r.distance
-        for r, via in ends:
-            win = grid.bounds_window(via.bounds)
-            m.distance[win][grid.mask(via, win)] = r.distance
+    out = []
+    for r in results:
+        if layer not in r.layers or r.outcome is not Outcome.MEASURED:
+            continue
+        assert r.plane is not None
+        via = Point(r.position).buffer(diameters[(r.position, r.net)] / 2)
+        out.append(End(via, antipad(fields, via, r.plane), r.distance))
+    return out
+
+
+def pad_ends(
+    layer: str, fields: ReturnFields, grounds: Sequence[str], distance: float
+) -> list[End]:
+    """Signal PTH pads on `layer`, measured as a via end there would be.
+    They are shown but never reported unserved."""
+    snap = fields.snapshot
+    outlines = list(reference_outlines(snap, layer, grounds))
+    out = []
+    for p in snap.pads:
+        if p.kind is not PadKind.PTH or not p.net or p.net in grounds:
+            continue
+        if layer not in p.shapes:
+            continue
+        at = Point(p.position)
+        plane = next((pl for pl, o in outlines if o.contains(at)), None)
+        found = plane and fields.distance_at(p.position, plane, distance)
+        if plane is None or found is None:
+            continue
+        copper = p.shapes[layer]
+        out.append(End(copper, antipad(fields, copper, plane), found))
+    return out
+
+
+def paint_ends(m: CoverageMap, grid: Grid, ends: Sequence[End]) -> None:
+    """Show each end's distance over its copper and over the layer's copper
+    in its hole, which the plane's field leaves as a void. The copper goes
+    on top, so a neighbour's hole never covers it."""
+    for e in ends:
+        win = grid.bounds_window(e.hole.bounds)
+        on_copper = grid.mask(e.hole, win) & ~np.isnan(m.distance[win])
+        m.distance[win][on_copper] = e.distance
+    for e in ends:
+        win = grid.bounds_window(e.copper.bounds)
+        m.distance[win][grid.mask(e.copper, win)] = e.distance
 
 
 def markers(
@@ -295,7 +337,12 @@ def execute(
     log_results(references, results, options.distance)
 
     maps = copper_maps(fields, references, grounds)
-    paint_via_ends(maps, results, fields)
+    for m in maps:
+        ends = [
+            *pad_ends(m.layer, fields, grounds, options.distance),
+            *via_ends(m.layer, results, fields),
+        ]
+        paint_ends(m, fields.grid, ends)
     marks = markers(results, maps, options.distance)
     if not maps:
         logger.info("No signal via changes layers: no heatmaps")

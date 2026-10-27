@@ -539,6 +539,80 @@ def test_via_shows_its_own_distance_over_a_neighbours_antipad(fakes):
         assert at(image, p) == palette_at(front[p])[0]
 
 
+PIN = (12.0, 5.0)
+PIN_RADIUS = 0.4
+PIN_HOLE = PIN_RADIUS + 0.5
+
+
+def test_signal_pth_pad_shows_its_distance_over_its_clearance_hole(fakes):
+    holes = unary_union([Point(SIG).buffer(ANTIPAD), Point(PIN).buffer(PIN_HOLE)])
+    plain = BOARD.difference(holes)
+    snap = snapshot(
+        returns=[("GND", (13.5, 5.0))], zones=[gnd_zone({L: plain for L in INNER})]
+    )
+    pin = Point(PIN).buffer(PIN_RADIUS)
+    pad = Pad("p", None, "SIG", PadKind.PTH, "1", PIN, 0.8, {"F.Cu": pin})
+    lead = Track("lead", "SIG", "F.Cu", 0.2, LineString([PIN, (9.0, 5.0)]))
+    snap.pads = [pad]
+    snap.tracks = [*snap.tracks, lead]
+    fakes.snap = snap
+
+    run(Board(), overlay=True, full_map=True)
+
+    image = rgba(fakes, "F.Cu")
+    found = ReturnFields(snap).distance_at(
+        PIN, ReferencePlane("In1.Cu", "GND"), DISTANCE
+    )
+    assert found is not None
+    (expected,) = palette_at(found)
+    in_hole = (PIN[0] - PIN_HOLE + GRID.pixel / 2, PIN[1])
+    assert at(image, PIN) == expected
+    assert at(image, in_hole) == expected
+    assert at(image, (PIN[0] - PIN_HOLE - GRID.pixel / 2, PIN[1])) != expected
+
+
+def test_smd_signal_pad_reads_its_planes_field(fakes):
+    snap = snapshot(returns=[("GND", (6.0, 5.0))])
+    pad_at = (9.0, 5.0)
+    shape = box(8.5, 4.5, 9.5, 5.5)
+    snap.pads = [Pad("p", None, "SIG", PadKind.SMD, "1", pad_at, 0.0, {"F.Cu": shape})]
+    fakes.snap = snap
+
+    run(Board(), overlay=True, full_map=True)
+
+    plane = ReferencePlane("In1.Cu", "GND")
+    expected = field_colour(snap, plane, pad_at)
+    assert at(rgba(fakes, "F.Cu"), pad_at) == expected
+
+
+def test_ground_pth_pad_reads_its_planes_field(fakes):
+    snap = snapshot(returns=[("GND", (6.0, 5.0))])
+    shapes = {L: Point(PIN).buffer(0.8) for L in ("F.Cu", "In1.Cu")}
+    snap.pads = [Pad("g", None, "GND", PadKind.PTH, "1", PIN, 0.8, shapes)]
+    fakes.snap = snap
+
+    run(Board(), overlay=True, full_map=True)
+
+    plane = ReferencePlane("In1.Cu", "GND")
+    edge = (PIN[0] + 0.7, PIN[1])
+    assert at(rgba(fakes, "F.Cu"), edge) == field_colour(snap, plane, edge)
+
+
+def test_netless_pth_pad_is_not_painted_as_an_end(fakes):
+    holes = unary_union([Point(SIG).buffer(ANTIPAD), Point(PIN).buffer(PIN_HOLE)])
+    plain = BOARD.difference(holes)
+    snap = snapshot(
+        returns=[("GND", (13.5, 5.0))], zones=[gnd_zone({L: plain for L in INNER})]
+    )
+    pin = Point(PIN).buffer(PIN_RADIUS)
+    snap.pads = [Pad("p", None, "", PadKind.PTH, "1", PIN, 0.8, {"F.Cu": pin})]
+    fakes.snap = snap
+
+    run(Board(), overlay=True, full_map=True)
+
+    assert at(rgba(fakes, "F.Cu"), PIN) == colour(STYLE.unreachable_colour)
+
+
 def test_via_shows_only_on_layers_where_it_has_a_measured_end(fakes):
     # SIG2 connects on F.Cu and In2.Cu; it passes B.Cu without copper there.
     sig2 = (15.0, 5.0)
