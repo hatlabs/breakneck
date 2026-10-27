@@ -113,10 +113,13 @@ def test_check_reports_whole_unstitched_pour_and_commits_nothing(fakes, log):
     assert all("0 existing stitches" in line for line in reports)
 
 
-def test_check_with_overlay_creates_only_the_image_commit(fakes, tmp_path: Path):
+def test_check_with_overlay_creates_only_the_image_commit(
+    fakes, tmp_path: Path, png_dir: Path, monkeypatch
+):
     created, placements = fakes
     board = Board()
-    outputs = overlay.Outputs(overlay_dir=tmp_path)
+    outputs = overlay.Outputs(overlay=True)
+    monkeypatch.chdir(tmp_path)
 
     pourstitch_command.execute(OPTIONS, outputs, check=True, kicad=KiCad(board))  # type: ignore[arg-type]
 
@@ -127,16 +130,15 @@ def test_check_with_overlay_creates_only_the_image_commit(fakes, tmp_path: Path)
         ("push_commit", pourstitch_command.OVERLAY_COMMIT),
     ]
     assert len(created) == len(LAYERS)
-    assert sorted(p.name for p in tmp_path.iterdir()) == [
-        "pourstitch-B_Cu.png",
-        "pourstitch-F_Cu.png",
-    ]
+    # The placed images carry the PNG data; no file is left behind.
+    assert all(i.image_data for i in created)
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_dry_run_still_places_overlay(fakes, tmp_path: Path):
     created, placements = fakes
     board = Board()
-    outputs = overlay.Outputs(overlay_dir=tmp_path, render=tmp_path / "heat.png")
+    outputs = overlay.Outputs(overlay=True, render=tmp_path / "heat.png")
 
     pourstitch_command.execute(OPTIONS, outputs, dry_run=True, kicad=KiCad(board))  # type: ignore[arg-type]
 
@@ -149,10 +151,10 @@ def test_dry_run_still_places_overlay(fakes, tmp_path: Path):
     assert (tmp_path / "heat.png").exists()
 
 
-def test_disabled_overlay_layer_fails_before_any_board_change(fakes, tmp_path: Path):
+def test_disabled_overlay_layer_fails_before_any_board_change(fakes):
     _, placements = fakes
     board = Board(enabled=(BL.BL_User_1,))
-    outputs = overlay.Outputs(overlay_dir=tmp_path)
+    outputs = overlay.Outputs(overlay=True)
 
     with pytest.raises(overlay.OverlayLayersError, match="User.2"):
         pourstitch_command.execute(OPTIONS, outputs, kicad=KiCad(board))  # type: ignore[arg-type]
@@ -161,20 +163,22 @@ def test_disabled_overlay_layer_fails_before_any_board_change(fakes, tmp_path: P
     assert board.calls == []
 
 
-def test_disabled_overlay_layer_in_dry_run_writes_pngs_only(fakes, tmp_path: Path):
+def test_disabled_overlay_layer_in_dry_run_keeps_the_pngs(fakes, png_dir, log):
     created, _ = fakes
     board = Board(enabled=())
-    outputs = overlay.Outputs(overlay_dir=tmp_path)
+    outputs = overlay.Outputs(overlay=True)
 
     pourstitch_command.execute(OPTIONS, outputs, dry_run=True, kicad=KiCad(board))  # type: ignore[arg-type]
 
     assert board.calls == []
     assert created == []
-    assert len(list(tmp_path.glob("*.png"))) == len(LAYERS)
+    pngs = sorted(png_dir.glob("*.png"))
+    assert len(pngs) == len(LAYERS)
+    assert all(any(str(p) in line for line in log) for p in pngs)
 
 
-def test_too_few_overlay_layers_is_an_error(fakes, tmp_path: Path):
-    outputs = overlay.Outputs(overlay_dir=tmp_path, overlay_layers=("User.1",))
+def test_too_few_overlay_layers_is_an_error(fakes):
+    outputs = overlay.Outputs(overlay=True, overlay_layers=("User.1",))
 
     with pytest.raises(overlay.OverlayLayersError):
         pourstitch_command.execute(OPTIONS, outputs, kicad=KiCad(Board()))  # type: ignore[arg-type]
@@ -268,13 +272,11 @@ class ClearBoard(Board):
 
 
 @pytest.mark.parametrize("tagged", [True, False])
-def test_clear_removes_the_overlays_pourstitch_placed(
-    fakes, tmp_path: Path, monkeypatch, tagged
-):
+def test_clear_removes_the_overlays_pourstitch_placed(fakes, monkeypatch, tagged):
     # Earlier builds placed them untagged, without a legend, at the board
     # placement: only that placement matches.
     created, _ = fakes
-    outputs = overlay.Outputs(overlay_dir=tmp_path)
+    outputs = overlay.Outputs(overlay=True)
     pourstitch_command.execute(OPTIONS, outputs, check=True, kicad=KiCad(Board()))  # type: ignore[arg-type]
     assert created
     if not tagged:
@@ -327,9 +329,9 @@ class ImagesBoard(Board):
         return self.images
 
 
-def test_run_without_maps_removes_the_previous_overlays(fakes, tmp_path: Path):
+def test_run_without_maps_removes_the_previous_overlays(fakes):
     created, _ = fakes
-    outputs = overlay.Outputs(overlay_dir=tmp_path)
+    outputs = overlay.Outputs(overlay=True)
     pourstitch_command.execute(OPTIONS, outputs, check=True, kicad=KiCad(Board()))  # type: ignore[arg-type]
     board = ImagesBoard(list(created))
 
@@ -355,3 +357,31 @@ def test_render_creates_the_missing_parent_directory(fakes, tmp_path: Path):
     pourstitch_command.execute(OPTIONS, outputs, check=True, kicad=KiCad(Board()))  # type: ignore[arg-type]
 
     assert path.exists()
+
+
+def test_failed_placement_leaves_no_temporary_directory(fakes, png_dir, monkeypatch):
+    def drop(board, items):
+        raise ConnectionError("KiCad went away")
+
+    monkeypatch.setattr(overlay, "create_checked", drop)
+
+    with pytest.raises(ConnectionError):
+        pourstitch_command.execute(
+            OPTIONS,
+            overlay.Outputs(overlay=True),
+            check=True,
+            kicad=KiCad(Board()),  # type: ignore[arg-type]
+        )
+
+    assert not png_dir.exists()
+
+
+def test_unplaceable_run_without_maps_leaves_no_temporary_directory(fakes, png_dir):
+    pourstitch_command.execute(
+        Options(nets=("+3.3V",)),
+        overlay.Outputs(overlay=True),
+        dry_run=True,
+        kicad=KiCad(Board(enabled=())),  # type: ignore[arg-type]
+    )
+
+    assert not png_dir.exists()

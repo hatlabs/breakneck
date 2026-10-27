@@ -238,12 +238,8 @@ def _add_heatmap_arguments(parser: argparse.ArgumentParser, check_help: str) -> 
     )
     parser.add_argument(
         "--overlay",
-        nargs="?",
-        type=Path,
-        const=Path("."),
-        metavar="DIR",
-        help="Write per-layer heatmap PNGs to DIR (default: .) and place them "
-        "on the board as reference images",
+        action="store_true",
+        help="Place per-layer heatmaps on the board as reference images",
     )
     parser.add_argument(
         "--overlay-layers",
@@ -285,7 +281,7 @@ def execute_returnvia(args):
     )
     outputs = breakneck.overlay.Outputs(
         render=args.render,
-        overlay_dir=args.overlay,
+        overlay=args.overlay,
         overlay_layers=tuple(args.overlay_layers),
     )
     with _exit_on(
@@ -518,7 +514,7 @@ def execute_pourstitch(args):
     )
     outputs = breakneck.overlay.Outputs(
         render=args.render,
-        overlay_dir=args.overlay,
+        overlay=args.overlay,
         overlay_layers=tuple(args.overlay_layers),
     )
     with _exit_on(breakneck.overlay.OverlayLayersError, *PLACEMENT_ERRORS):

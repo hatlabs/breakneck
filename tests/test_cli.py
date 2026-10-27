@@ -1,6 +1,5 @@
 import argparse
 import sys
-from pathlib import Path
 
 import pytest
 from loguru import logger
@@ -135,10 +134,17 @@ def test_returnvia_takes_the_heatmap_options(monkeypatch, tmp_path):
     assert options.distance == 2
     assert outputs == overlay.Outputs(
         render=tmp_path / "heat.png",
-        overlay_dir=Path("."),
+        overlay=True,
         overlay_layers=("User.5", "User.6", "User.7", "User.8"),
     )
     assert kw["check"]
+
+
+@pytest.mark.parametrize("argv", [["returnvia"], ["pourstitch", "--nets", "GND"]])
+def test_overlay_takes_no_directory(monkeypatch, argv):
+    assert parsed(monkeypatch, [*argv, "--overlay"]).overlay is True
+    with pytest.raises(SystemExit):
+        parsed(monkeypatch, [*argv, "--overlay", "out"])
 
 
 @pytest.mark.parametrize(

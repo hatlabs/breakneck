@@ -10,8 +10,10 @@ breakneck's; KiCad keeps it in the image data it reports back.
 from __future__ import annotations
 
 import math
+import shutil
 import struct
-from collections.abc import Mapping, Sequence
+import tempfile
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,6 +41,7 @@ PNG_IHDR_SIZE = struct.Struct(">II")
 # an image within these of it is taken as breakneck's.
 POSITION_TOLERANCE_NM = 1000
 SCALE_TOLERANCE = 1e-6
+PNG_DIR_PREFIX = "breakneck-overlay-"
 
 
 @dataclass(frozen=True)
@@ -100,7 +103,7 @@ class Outputs:
     """Where a heatmap command writes its panels and overlays."""
 
     render: Path | None = None
-    overlay_dir: Path | None = None
+    overlay: bool = False
     overlay_layers: tuple[str, ...] = DEFAULT_OVERLAY_LAYERS
 
 
@@ -251,33 +254,50 @@ def place_overlays(
 
 def show_overlays(
     board: kipy.board.Board,
-    pngs: Mapping[str, Path],
+    write_pngs: Callable[[Path], Mapping[str, Path]] | None,
     snapshot: Snapshot,
     outputs: Outputs,
     place: bool,
     commit_label: str,
 ) -> None:
-    """Place the per-copper-layer PNGs as this run's overlay set, or log
-    where they would go.
+    """Write the per-copper-layer PNGs and place them as this run's overlay
+    set, or log where they would go. `write_pngs` None means no images: the
+    previous set is only removed.
 
-    Each PNG's pixel (0, 0) goes at the board raster's origin; a PNG larger
-    than the raster, as with a legend below it, extends right and down.
+    The board embeds the image data, so the PNGs go to a temporary directory
+    that is removed once they are placed. When they are not, they stay there
+    for placing by hand. Each PNG's pixel (0, 0) goes at the board raster's
+    origin; a PNG larger than the raster, as with a legend below it, extends
+    right and down.
     """
-    layers = layer_map(snapshot.copper_layers, outputs.overlay_layers)
     bounds = snapshot.board_outline.bounds
-    origin = (bounds[0], bounds[1])
-    images = [
-        OverlayImage(
-            L,
-            layers[L],
-            path,
-            image_placement(origin, png_size(path.read_bytes()), POURSTITCH_PIXEL),
-        )
-        for L, path in pngs.items()
-    ]
     placement = board_placement(bounds)
-    if place:
-        place_overlays(board, images, placement, outputs.overlay_layers, commit_label)
-    else:
+    if write_pngs is None:
+        if place:
+            place_overlays(board, [], placement, outputs.overlay_layers, commit_label)
+        return
+    out_dir = Path(tempfile.mkdtemp(prefix=PNG_DIR_PREFIX))
+    try:
+        pngs = write_pngs(out_dir)
+        layers = layer_map(snapshot.copper_layers, outputs.overlay_layers)
+        origin = (bounds[0], bounds[1])
+        images = [
+            OverlayImage(
+                L,
+                layers[L],
+                path,
+                image_placement(origin, png_size(path.read_bytes()), POURSTITCH_PIXEL),
+            )
+            for L, path in pngs.items()
+        ]
+        placed = place and place_overlays(
+            board, images, placement, outputs.overlay_layers, commit_label
+        )
+    except BaseException:
+        shutil.rmtree(out_dir)
+        raise
+    if placed:
+        shutil.rmtree(out_dir)
+    elif not place:
         for i in images:
             logger.info(f"Overlay not placed: {i.describe()}")

@@ -240,9 +240,7 @@ def execute(
     kicad = kicad or kipy.KiCad()
     board = kicad.get_board()
     check_outline(board)
-    place_overlay = outputs.overlay_dir is not None and overlay.overlay_ready(
-        board, outputs, dry_run
-    )
+    place_overlay = outputs.overlay and overlay.overlay_ready(board, outputs, dry_run)
 
     if check:
         snapshot, plan = measure_only(kicad, board)
@@ -279,10 +277,18 @@ def execute(
         )
         logger.info(f"Wrote {outputs.render}")
 
-    if outputs.overlay_dir is not None:
-        pngs = render.write_overlays(
-            outputs.overlay_dir, fields.grid, maps, marks, options.distance, STYLE
-        )
+    if outputs.overlay:
         overlay.show_overlays(
-            board, pngs, snapshot, outputs, place_overlay, OVERLAY_COMMIT
+            board,
+            (
+                lambda out_dir: render.write_overlays(
+                    out_dir, fields.grid, maps, marks, options.distance, STYLE
+                )
+            )
+            if maps
+            else None,
+            snapshot,
+            outputs,
+            place_overlay,
+            OVERLAY_COMMIT,
         )

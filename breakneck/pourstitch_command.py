@@ -93,9 +93,7 @@ def execute(
     """
     kicad = kicad or kipy.KiCad()
     board = kicad.get_board()
-    place_overlay = outputs.overlay_dir is not None and overlay.overlay_ready(
-        board, outputs, dry_run
-    )
+    place_overlay = outputs.overlay and overlay.overlay_ready(board, outputs, dry_run)
 
     stitcher = PourStitcher()
     if check:
@@ -132,11 +130,19 @@ def execute(
         )
         logger.info(f"Wrote {outputs.render}")
 
-    if outputs.overlay_dir is not None:
+    if outputs.overlay:
         # On the board, existing and planned vias show as themselves.
-        pngs = render.write_overlays(
-            outputs.overlay_dir, grid, maps, {}, options.distance, STYLE
-        )
         overlay.show_overlays(
-            board, pngs, snapshot, outputs, place_overlay, OVERLAY_COMMIT
+            board,
+            (
+                lambda out_dir: render.write_overlays(
+                    out_dir, grid, maps, {}, options.distance, STYLE
+                )
+            )
+            if maps
+            else None,
+            snapshot,
+            outputs,
+            place_overlay,
+            OVERLAY_COMMIT,
         )
