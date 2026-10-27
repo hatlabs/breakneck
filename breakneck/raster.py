@@ -169,23 +169,24 @@ def geodesic(
 class CoverageMap:
     """Distance (mm) through `net`'s fill on `layer` to the nearest seed.
 
-    NaN outside the fill, inf where no seed reaches. `unstitchable` marks
-    fill that is out of reach by construction and drawn apart from the scale.
+    NaN outside the fill, inf where no seed reaches. `excluded` marks fill
+    that is drawn apart from the scale and left out of the uncovered area:
+    pourstitch marks copper it can't stitch, returnvia leaves it empty.
     """
 
     net: str
     layer: str
     distance: FloatMap
-    unstitchable: BoolMap
+    excluded: BoolMap
 
     def uncovered(self, distance: float) -> BoolMap:
-        """Fill farther than `distance` from a seed, unstitchable fill aside."""
-        return uncovered(self.distance, self.unstitchable, distance)
+        """Fill farther than `distance` from a seed, excluded fill aside."""
+        return uncovered(self.distance, self.excluded, distance)
 
 
-def uncovered(dist: FloatMap, unstitchable: BoolMap, distance: float) -> BoolMap:
-    """Pixels farther than `distance` from a seed, unstitchable ones aside.
+def uncovered(dist: FloatMap, excluded: BoolMap, distance: float) -> BoolMap:
+    """Pixels farther than `distance` from a seed, excluded ones aside.
 
     Outside the fill `dist` must be NaN, or the caller masks the result by it.
     """
-    return (dist > distance) & ~unstitchable
+    return (dist > distance) & ~excluded

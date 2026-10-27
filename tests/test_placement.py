@@ -776,3 +776,25 @@ def test_refill_busy_until_the_deadline_is_not_success():
 
     assert not ok
     assert board.refills == 4  # the first call plus one per poll
+
+
+@pytest.mark.parametrize("refilled", [True, False])
+def test_measure_only_refills_and_snapshots_with_an_empty_plan(
+    monkeypatch, log, refilled
+):
+    board, kicad, snap = object(), object(), Snapshot(copper_layers=("F.Cu",))
+    refills = []
+    monkeypatch.setattr(
+        placement,
+        "refill_tolerant",
+        lambda k, b: refills.append((k, b)) or refilled,
+    )
+    monkeypatch.setattr(Snapshot, "from_board", staticmethod(lambda b: snap))
+
+    result = placement.measure_only(kicad, board)  # type: ignore[arg-type]
+
+    assert result == (snap, Plan())
+    assert refills == [(kicad, board)]
+    stale = [m for m in log if "fills may be stale" in m]
+    assert len(stale) == (0 if refilled else 1)
+    assert all(m.startswith("WARNING") for m in stale)

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 import struct
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,7 +23,7 @@ from loguru import logger
 
 from breakneck.commit import CreateItemsError, create_checked
 from breakneck.plan import POURSTITCH_PIXEL, raster_size
-from breakneck.snapshot import NM_PER_MM, Point2
+from breakneck.snapshot import NM_PER_MM, Point2, Snapshot
 
 DEFAULT_OVERLAY_LAYERS = ("User.1", "User.2", "User.3", "User.4")
 MM_PER_INCH = 25.4
@@ -92,6 +92,37 @@ def enable_hint(missing: Sequence[str]) -> str:
         f"Overlay layers not enabled on the board: {', '.join(missing)}. Enable them "
         "in Board Setup → Board Editor Layers, or pass --overlay-layers"
     )
+
+
+@dataclass(frozen=True)
+class Outputs:
+    """Where a heatmap command writes its panels and overlays."""
+
+    render: Path | None = None
+    overlay_dir: Path | None = None
+    overlay_layers: tuple[str, ...] = DEFAULT_OVERLAY_LAYERS
+
+
+class OverlayLayersError(RuntimeError):
+    pass
+
+
+def overlay_ready(board: kipy.board.Board, outputs: Outputs, dry_run: bool) -> bool:
+    """Whether overlays can go on the board; raises before any board change if not."""
+    count = board.get_copper_layer_count()
+    if count > len(outputs.overlay_layers):
+        raise OverlayLayersError(
+            f"{count} copper layers need {count} overlay layers; got "
+            + ", ".join(outputs.overlay_layers)
+        )
+    needed = outputs.overlay_layers[:count]
+    missing = missing_layers(board, needed)
+    if not missing:
+        return True
+    if dry_run:
+        logger.warning(enable_hint(missing) + "; writing the PNGs only")
+        return False
+    raise OverlayLayersError(enable_hint(missing))
 
 
 @dataclass(frozen=True)
@@ -167,26 +198,27 @@ def overlays_on(
 def place_overlays(
     board: kipy.board.Board,
     images: Sequence[OverlayImage],
+    placement: ImagePlacement,
     overlay_layers: Sequence[str],
     commit_label: str,
 ) -> bool:
     """Replace breakneck's overlays on the overlay layers in one commit.
 
-    Other reference images on those layers are left alone. If KiCad refuses
-    an image, nothing changes and the log says where to place the PNGs by
-    hand.
+    `placement` is the board's overlay placement, which finds untagged
+    overlays of earlier builds. With no images, the previous set is only
+    removed; with nothing to remove either, nothing is committed. Other
+    reference images on those layers are left alone. If KiCad refuses an
+    image, nothing changes and the log says where to place the PNGs by hand.
     """
-    placements = {i.placement for i in images}
-    old = [
-        i
-        for i in board.get_reference_images()
-        if any(is_overlay(i, p, overlay_layers) for p in placements)
-    ]
+    old = overlays_on(board, overlay_layers, placement)
+    if not images and not old:
+        return True
     commit = board.begin_commit()
     try:
         if old:
             board.remove_items(old)
-        create_checked(board, [_reference_image(i) for i in images])
+        if images:
+            create_checked(board, [_reference_image(i) for i in images])
     except CreateItemsError as e:
         board.drop_commit(commit)
         logger.warning(f"KiCad refused the overlay images ({e}); place them by hand:")
@@ -197,10 +229,33 @@ def place_overlays(
         board.drop_commit(commit)
         raise
     board.push_commit(commit, commit_label)
-    logger.info(
-        f"Placed {len(images)} overlay images"
-        + (f", replacing {len(old)}" if old else "")
-    )
+    if images:
+        logger.info(
+            f"Placed {len(images)} overlay images"
+            + (f", replacing {len(old)}" if old else "")
+        )
+    else:
+        logger.info(f"Removed {len(old)} overlay images")
     for i in images:
         logger.info(f"  {i.describe()}")
     return True
+
+
+def show_overlays(
+    board: kipy.board.Board,
+    pngs: Mapping[str, Path],
+    snapshot: Snapshot,
+    outputs: Outputs,
+    place: bool,
+    commit_label: str,
+) -> None:
+    """Place the per-copper-layer PNGs as this run's overlay set, or log
+    where they would go."""
+    layers = layer_map(snapshot.copper_layers, outputs.overlay_layers)
+    placement = board_placement(snapshot.board_outline.bounds)
+    images = [OverlayImage(L, layers[L], path, placement) for L, path in pngs.items()]
+    if place:
+        place_overlays(board, images, placement, outputs.overlay_layers, commit_label)
+    else:
+        for i in images:
+            logger.info(f"Overlay not placed: {i.describe()}")

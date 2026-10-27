@@ -35,6 +35,11 @@ def pad_clearance(override: float | None) -> float:
 POURSTITCH_DISTANCE = 2.5
 POURSTITCH_FALLBACK_VIA = ViaSize(0.5, 0.3)
 POURSTITCH_PIXEL = 0.1
+# Every raster clearance gets one pixel of margin for the rasterisation error.
+QUANTISATION = 0.1
+# Thermal spokes let an existing via or PTH pad reach fill a little beyond its
+# copper.
+THERMAL_REACH = 0.4
 
 
 def raster_size(

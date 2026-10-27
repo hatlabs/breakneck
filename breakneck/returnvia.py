@@ -1,8 +1,10 @@
 """Return vias: a ground via near every via on a non-ground net.
 
-The same check drives `returnvia`, which plans the missing vias, and
+This straight-line check plans the missing vias for `returnvia` and drives
 `gndvia`, which only draws lines from each unserved via to its nearest
-return. Both use only core dependencies, so neither needs the `place` extra.
+return. It uses only core dependencies, so `gndvia` runs on the base
+install; the `returnvia` command needs the `place` extra, because it
+reports the distance through each reference plane (see `returnpath`).
 """
 
 from __future__ import annotations
@@ -12,10 +14,12 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from loguru import logger
+from shapely.geometry import Point
+from shapely.geometry.base import BaseGeometry
 
 from breakneck.obstacles import Obstacles
 from breakneck.plan import OTHER_NET_CLEARANCE, Plan, PlannedUnit, UnfixableSpot
-from breakneck.snapshot import PadKind, Point2, Snapshot, ViaSize
+from breakneck.snapshot import PadKind, Point2, Snapshot, Via, ViaSize
 
 DEFAULT_DISTANCE = 1.5
 FALLBACK_GROUND = "GND"
@@ -154,6 +158,114 @@ def _spot_ok(
         and obstacles.reaches_zones(position, ground, size, filled=True)
         and obstacles.via_is_clear(position, ground, size, polygon_disk=True)
     )
+
+
+# ---- reference planes --------------------------------------------------------
+
+MIN_CONNECTED_LAYERS = 2
+
+
+@dataclass(frozen=True)
+class ReferencePlane:
+    layer: str
+    ground: str
+
+
+@dataclass(frozen=True)
+class LayerReference:
+    """A layer a via connects on; `plane` None means outside every ground zone."""
+
+    layer: str
+    plane: ReferencePlane | None
+
+
+@dataclass(frozen=True)
+class ViaReferences:
+    via: Via
+    # In stack order.
+    layers: tuple[LayerReference, ...]
+
+    @property
+    def exempt(self) -> bool:
+        """A via connecting on fewer than two layers carries no layer change."""
+        return len(self.layers) < MIN_CONNECTED_LAYERS
+
+    @property
+    def planes(self) -> tuple[ReferencePlane, ...]:
+        """Distinct reference planes: each is one return measurement."""
+        return tuple(dict.fromkeys(c.plane for c in self.layers if c.plane))
+
+
+def via_references(
+    snapshot: Snapshot, ground_nets: Iterable[str] | None
+) -> list[ViaReferences]:
+    """Connected layers and their reference planes for every non-ground via."""
+    grounds = resolve_ground_nets(snapshot, ground_nets)
+    return [
+        ViaReferences(
+            v,
+            tuple(
+                LayerReference(L, _reference_plane(snapshot, v.position, L, grounds))
+                for L in _connected_layers(snapshot, v)
+            ),
+        )
+        for v in sorted(snapshot.vias, key=lambda v: v.position)
+        if v.net and v.net not in grounds
+    ]
+
+
+def _reference_plane(
+    snapshot: Snapshot, position: Point2, layer: str, grounds: Sequence[str]
+) -> ReferencePlane | None:
+    """Nearest other layer in stack order with a ground outline at `position`.
+
+    Equidistant layers resolve to the upper one; overlapping outlines on the
+    plane resolve to the highest zone priority, as in `ground_net_at`.
+    """
+    stack = snapshot.copper_layers
+    i = stack.index(layer)
+    pt = Point(position)
+    for step in range(1, len(stack)):
+        for j in (i - step, i + step):
+            if not 0 <= j < len(stack):
+                continue
+            hits = [
+                z
+                for z in snapshot.copper_zones
+                if z.net in grounds and stack[j] in z.layers and z.outline.contains(pt)
+            ]
+            if hits:
+                plane = max(hits, key=lambda z: z.priority)
+                assert plane.net is not None
+                return ReferencePlane(stack[j], plane.net)
+    return None
+
+
+def _connected_layers(snapshot: Snapshot, v: Via) -> list[str]:
+    """Layers where same-net copper (track, pad or fill) touches the via."""
+    centre = Point(v.position)
+    radius = v.diameter / 2
+
+    def touches(geometry: BaseGeometry, reach: float = 0.0) -> bool:
+        return (
+            not geometry.is_empty
+            and geometry.distance(centre) <= radius + reach + DISTANCE_EPSILON
+        )
+
+    layers = {
+        t.layer
+        for t in snapshot.tracks
+        if t.net == v.net and touches(t.centreline, t.width / 2)
+    }
+    layers |= {
+        L
+        for p in snapshot.pads
+        if p.net == v.net
+        for L, shape in p.shapes.items()
+        if touches(shape)
+    }
+    layers |= {L for L in snapshot.copper_layers if touches(snapshot.fill(v.net, L))}
+    return [L for L in snapshot.copper_layers if L in layers]
 
 
 # ---- planner -----------------------------------------------------------------

@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
-from pathlib import Path
 
 import kipy
 import kipy.board
 from loguru import logger
 
 from breakneck import overlay, render
-from breakneck.commit import refill_tolerant
-from breakneck.placement import RunSettings, run_placement
+from breakneck.placement import RunSettings, measure_only, run_placement
 from breakneck.plan import Plan
 from breakneck.pourstitch import Options, PourStitcher, summarise
 from breakneck.raster import CoverageMap, Grid
@@ -34,35 +31,6 @@ STYLE = render.HeatmapStyle(
     over_colour=OVER_COLOUR,
     unreachable_colour=OVER_COLOUR,
 )
-
-
-@dataclass(frozen=True)
-class Outputs:
-    render: Path | None = None
-    overlay_dir: Path | None = None
-    overlay_layers: tuple[str, ...] = overlay.DEFAULT_OVERLAY_LAYERS
-
-
-class OverlayLayersError(RuntimeError):
-    pass
-
-
-def _overlay_ready(board: kipy.board.Board, outputs: Outputs, dry_run: bool) -> bool:
-    """Whether overlays can go on the board; raises before any board change if not."""
-    count = board.get_copper_layer_count()
-    if count > len(outputs.overlay_layers):
-        raise OverlayLayersError(
-            f"{count} copper layers need {count} overlay layers; got "
-            + ", ".join(outputs.overlay_layers)
-        )
-    needed = outputs.overlay_layers[:count]
-    missing = overlay.missing_layers(board, needed)
-    if not missing:
-        return True
-    if dry_run:
-        logger.warning(overlay.enable_hint(missing) + "; writing the PNGs only")
-        return False
-    raise OverlayLayersError(overlay.enable_hint(missing))
 
 
 def _log_coverage(
@@ -109,7 +77,7 @@ def markers(
 
 def execute(
     options: Options,
-    outputs: Outputs,
+    outputs: overlay.Outputs,
     *,
     dry_run: bool = False,
     check: bool = False,
@@ -125,16 +93,13 @@ def execute(
     """
     kicad = kicad or kipy.KiCad()
     board = kicad.get_board()
-    place_overlay = outputs.overlay_dir is not None and _overlay_ready(
+    place_overlay = outputs.overlay_dir is not None and overlay.overlay_ready(
         board, outputs, dry_run
     )
 
     stitcher = PourStitcher()
     if check:
-        if not refill_tolerant(kicad, board):
-            logger.warning("Zone refill not confirmed; fills may be stale")
-        snapshot = Snapshot.from_board(board)
-        plan = Plan()
+        snapshot, plan = measure_only(kicad, board)
     else:
         result = run_placement(
             stitcher,
@@ -172,16 +137,6 @@ def execute(
         pngs = render.write_overlays(
             outputs.overlay_dir, grid, maps, {}, options.distance, STYLE
         )
-        layers = overlay.layer_map(snapshot.copper_layers, outputs.overlay_layers)
-        placement = overlay.board_placement(snapshot.board_outline.bounds, grid.pixel)
-        images = [
-            overlay.OverlayImage(L, layers[L], path, placement)
-            for L, path in pngs.items()
-        ]
-        if place_overlay and images:
-            overlay.place_overlays(
-                board, images, outputs.overlay_layers, OVERLAY_COMMIT
-            )
-        else:
-            for i in images:
-                logger.info(f"Overlay not placed: {i.describe()}")
+        overlay.show_overlays(
+            board, pngs, snapshot, outputs, place_overlay, OVERLAY_COMMIT
+        )

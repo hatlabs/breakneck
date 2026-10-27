@@ -25,10 +25,10 @@ def rgb(colour):
     return tuple(round(c * 255) for c in render.matplotlib.colors.to_rgb(colour))
 
 
-def coverage(net, layer, dist, unstitchable=None):
-    if unstitchable is None:
-        unstitchable = np.zeros(dist.shape, bool)
-    return CoverageMap(net, layer, dist, unstitchable)
+def coverage(net, layer, dist, excluded=None):
+    if excluded is None:
+        excluded = np.zeros(dist.shape, bool)
+    return CoverageMap(net, layer, dist, excluded)
 
 
 def test_placement_maps_pixel_zero_to_raster_origin():
@@ -95,11 +95,11 @@ def test_overlay_image_has_raster_size_and_transparent_background(tmp_path: Path
     assert tuple(rgba[0, 40, :3]) == (0xFF, 0x2A, 0x6D)
 
 
-def test_unstitchable_copper_is_grey_not_pink(tmp_path: Path):
+def test_excluded_copper_is_grey_not_pink(tmp_path: Path):
     dist = np.full((10, 10), np.inf)
-    unstitchable = np.zeros(dist.shape, bool)
-    unstitchable[:, 5:] = True
-    maps = [coverage("GND", "F.Cu", dist, unstitchable)]
+    excluded = np.zeros(dist.shape, bool)
+    excluded[:, 5:] = True
+    maps = [coverage("GND", "F.Cu", dist, excluded)]
 
     rgba = np.asarray(
         Image.open(
@@ -108,12 +108,12 @@ def test_unstitchable_copper_is_grey_not_pink(tmp_path: Path):
     )
 
     assert tuple(rgba[0, 0, :3]) == (0xFF, 0x2A, 0x6D)
-    grey = render.matplotlib.colors.to_rgb(render.UNSTITCHABLE_COLOUR)
+    grey = render.matplotlib.colors.to_rgb(render.EXCLUDED_COLOUR)
     assert tuple(rgba[0, 9, :3]) == tuple(round(c * 255) for c in grey)
     assert rgba[0, 9, 3] == 255
 
 
-def test_layers_differing_only_in_unstitchable_copper_get_own_panels():
+def test_layers_differing_only_in_excluded_copper_get_own_panels():
     a = np.array([[np.inf, np.inf]])
     maps = [
         coverage("GND", "F.Cu", a),
@@ -157,9 +157,9 @@ def test_render_panels_draws_markers_where_they_are(tmp_path: Path):
     )
     grid = Grid(0, 0, 30, 20)
     dist = np.zeros((20, 30))
-    unstitchable = np.zeros(dist.shape, bool)
-    unstitchable[:, 25:] = True
-    maps = [coverage("GND", "F.Cu", dist, unstitchable)]
+    excluded = np.zeros(dist.shape, bool)
+    excluded[:, 25:] = True
+    maps = [coverage("GND", "F.Cu", dist, excluded)]
     plan = Plan(
         units=(PlannedUnit((1.5, 1.0), "GND", ViaSize(0.6, 0.3)),),
         unfixable=(UnfixableSpot((2.0, 1.4), "GND", "no fit", "F.Cu"),),
@@ -176,7 +176,7 @@ def test_render_panels_draws_markers_where_they_are(tmp_path: Path):
         return np.abs(rgb_px - rgb(colour)).sum(axis=2) < 30
 
     # The zero-distance copper is one solid colour; the rows and columns it
-    # dominates span the board from x 0 to the unstitchable strip at 2.5 mm
+    # dominates span the board from x 0 to the excluded strip at 2.5 mm
     # and from y 0 to 2 mm. The colourbar's low end shares the colour but
     # fills too little of any row to count.
     solid = near(render.matplotlib.colors.to_hex(STYLE_CMAP(0.0)))
@@ -198,7 +198,7 @@ def test_render_panels_draws_markers_where_they_are(tmp_path: Path):
     assert hit(render.MARKER_COLOUR, (1.5, 1.0))
     assert hit(render.UNFIXABLE_COLOUR, (2.0, 1.4), reach=2)
     assert not hit(render.UNFIXABLE_COLOUR, (1.5, 1.4), reach=2)
-    assert hit(render.UNSTITCHABLE_COLOUR, (2.75, 1.0))
+    assert hit(render.EXCLUDED_COLOUR, (2.75, 1.0))
 
 
 def test_render_panels_paints_unreached_copper_pink(tmp_path: Path):
@@ -285,6 +285,128 @@ def test_overlay_draws_rings_only(tmp_path: Path):
     assert rgba[(*grid.index((2.5, 2.0)), 3)] == 0
     assert tuple(rgba[grid.index((1.0, 3.5))]) != white
     assert rgba[(*grid.index((3.0, 0.5)), 3)] == 0
+
+
+CONTOUR_COLOUR = "#ff0000"
+CONTOUR_MARGIN = 0.1
+SCALE = 3.0
+CONTOUR_STYLE = render.HeatmapStyle(
+    title="Contoured",
+    colourbar_label="mm",
+    png_prefix="contoured",
+    colormap="cividis",
+    over_colour=None,
+    unreachable_colour="#00ff00",
+    scale=SCALE,
+    contour=render.Contour(CONTOUR_COLOUR, CONTOUR_MARGIN),
+)
+
+
+def ramp(width: int, height: int = 20, pixel: float = 0.1) -> np.ndarray:
+    """Distance growing by one pixel per column from 0 at the left edge."""
+    return np.tile(np.arange(width) * pixel, (height, 1))
+
+
+def test_overlay_marks_the_contour_and_saturates_beyond_the_scale(tmp_path: Path):
+    dist = ramp(100)
+    maps = [coverage("GND", "In1.Cu", dist)]
+    level = D + CONTOUR_MARGIN
+
+    paths = render.write_overlays(tmp_path, grid_of(maps), maps, {}, D, CONTOUR_STYLE)
+
+    rgba = np.asarray(Image.open(paths["In1.Cu"]).convert("RGBA"))
+    red = rgb(CONTOUR_COLOUR)
+    on_red = [c for c in range(dist.shape[1]) if tuple(rgba[10, c, :3]) == red]
+    # The served side's last pixel: one pixel wide, on every row.
+    (last,) = np.nonzero(dist[0] <= level)[0][-1:]
+    assert on_red == [last]
+    assert (rgba[:, last, :3] == red).all()
+    cividis = render.plt.get_cmap("cividis")
+    assert tuple(rgba[10, 0, :3]) == tuple(cividis(0.0, bytes=True)[:3])
+    top = tuple(cividis(1.0, bytes=True)[:3])
+    beyond = np.nonzero(dist[0] > SCALE * D)[0]
+    assert beyond.size and all(tuple(rgba[10, c, :3]) == top for c in beyond)
+    assert tuple(rgba[10, beyond[0] - 2, :3]) != top
+
+
+def test_overlay_without_contour_style_draws_none(tmp_path: Path):
+    dist = ramp(40)
+    maps = [coverage("GND", "F.Cu", dist)]
+
+    rgba = render.overlay_rgba(grid_of(maps), maps, {}, D, STYLE)
+
+    norm = render.matplotlib.colors.Normalize(vmin=0, vmax=D)
+    expected = STYLE_CMAP(norm(np.minimum(dist, D)), bytes=True)
+    assert (rgba[dist <= D] == expected[dist <= D]).all()
+
+
+def test_render_panels_draws_the_contour_and_the_saturated_colour(tmp_path: Path):
+    width_mm, height_mm = 10.0, 2.0
+    snap = Snapshot(
+        copper_layers=("In1.Cu",),
+        edge_paths=[list(box(0, 0, width_mm, height_mm).exterior.coords)],  # type: ignore[list-item]
+    )
+    grid = Grid(0, 0, 100, 20)
+    small_d = 1.0
+    maps = [coverage("GND", "In1.Cu", ramp(100))]
+    out = tmp_path / "heat.png"
+
+    render.render_panels(out, snap, grid, maps, {}, small_d, CONTOUR_STYLE)
+
+    rgb_px = np.asarray(Image.open(out).convert("RGB")).astype(int)
+
+    def near(colour, tol):
+        return np.abs(rgb_px - rgb(colour)).sum(axis=2) < tol
+
+    # The panel's copper runs from the scale's low end at x 0 to its
+    # saturated top at x 10 mm; the middle row of the panel crosses both.
+    cividis = render.plt.get_cmap("cividis")
+    low = near(render.matplotlib.colors.to_hex(cividis(0.0)), 30)
+    top = near(render.matplotlib.colors.to_hex(cividis(1.0)), 5)
+    counts = top.sum(axis=1)
+    middle = round(np.nonzero(counts > counts.max() / 2)[0].mean())
+    x0 = np.nonzero(low[middle])[0].min()
+    x1 = np.nonzero(top[middle])[0].max() + 1
+    px_per_mm = (x1 - x0) / width_mm
+
+    def column(x_mm):
+        return round(x0 + x_mm * px_per_mm)
+
+    assert top[middle, column(SCALE * small_d + 0.5)]
+    assert top[middle, column(width_mm - 0.5)]
+    assert not top[middle, column(SCALE * small_d - 0.5)]
+    red = np.nonzero(near(CONTOUR_COLOUR, 150)[middle])[0]
+    assert red.size
+    contour_mm = (red.mean() + 0.5 - x0) / px_per_mm
+    assert contour_mm == pytest.approx(small_d + CONTOUR_MARGIN, abs=0.15)
+
+
+@pytest.mark.parametrize(
+    "style, top, extend",
+    [
+        (STYLE, 0.0, "max"),
+        (CONTOUR_STYLE, SCALE * D, "neither"),
+        (CONTOUR_STYLE, SCALE * D + 0.1, "max"),
+    ],
+)
+def test_colourbar_extends_only_past_values_the_scale_leaves_out(style, top, extend):
+    dist = np.array([[0.0, top, np.inf, np.nan]])
+
+    assert render.colourbar_extend([coverage("GND", "F.Cu", dist)], D, style) == extend
+
+
+def test_ring_centred_off_the_grid_draws_its_arc_on_the_grid(tmp_path: Path):
+    dist = np.zeros((40, 40))
+    maps = [coverage("GND", "F.Cu", dist)]
+    grid = grid_of(maps)
+    marks = render.Markers(rings=(((-0.5, 2.0), 1.0),))
+
+    rgba = render.overlay_rgba(grid, maps, {("GND", "F.Cu"): marks}, D, STYLE)
+
+    white = (255, 255, 255, 255)
+    assert tuple(rgba[grid.index((0.45, 2.0))]) == white
+    assert tuple(rgba[grid.index((0.05, 2.0))]) != white
+    assert not (rgba[:, 10:] == white).all(axis=2).any()
 
 
 def test_folded_panel_draws_shared_circles_once_and_every_layers_crosses():
@@ -502,8 +624,12 @@ def test_place_overlays_replaces_images_in_one_commit(tmp_path, monkeypatch):
     )
 
     assert overlay.place_overlays(
-        board, [image(tmp_path)], ("User.1", "User.2"), "label"
-    )  # type: ignore[arg-type]
+        board,  # type: ignore[arg-type]
+        [image(tmp_path)],
+        PLACEMENT,
+        ("User.1", "User.2"),
+        "label",
+    )
 
     assert board.calls == [
         "begin_commit",
@@ -522,7 +648,13 @@ def test_place_overlays_commits_under_the_given_label(tmp_path, monkeypatch):
     monkeypatch.setattr(overlay, "create_checked", lambda board, items: None)
     board = ImageBoard()
 
-    overlay.place_overlays(board, [image(tmp_path)], ("User.1",), "other overlay")  # type: ignore[arg-type]
+    overlay.place_overlays(
+        board,  # type: ignore[arg-type]
+        [image(tmp_path)],
+        PLACEMENT,
+        ("User.1",),
+        "other overlay",
+    )
 
     assert board.calls == ["begin_commit", ("push_commit", "other overlay")]
 
@@ -534,9 +666,74 @@ def test_refused_overlay_falls_back_to_manual_placement(tmp_path, monkeypatch):
     monkeypatch.setattr(overlay, "create_checked", refuse)
     board = ImageBoard()
 
-    assert not overlay.place_overlays(board, [image(tmp_path)], ("User.1",), "label")  # type: ignore[arg-type]
+    assert not overlay.place_overlays(
+        board,  # type: ignore[arg-type]
+        [image(tmp_path)],
+        PLACEMENT,
+        ("User.1",),
+        "label",
+    )
 
     assert board.calls == ["begin_commit", "drop_commit"]
+
+
+def test_placing_no_images_removes_breakneck_overlays_only(monkeypatch):
+    created = []
+    monkeypatch.setattr(
+        overlay, "create_checked", lambda board, items: created.extend(items)
+    )
+    ours = Existing(BL.BL_User_2)
+    board = ImageBoard(
+        existing=[ours, Existing(BL.BL_User_1, (30, 30)), Existing(BL.BL_Cmts_User)]
+    )
+
+    assert overlay.place_overlays(
+        board,  # type: ignore[arg-type]
+        [],
+        PLACEMENT,
+        ("User.1", "User.2"),
+        "label",
+    )
+
+    assert board.calls == [
+        "begin_commit",
+        ("remove_items", 1),
+        ("push_commit", "label"),
+    ]
+    assert board.removed == [ours]
+    assert created == []
+
+
+def test_placing_no_images_over_none_makes_no_commit():
+    board = ImageBoard(existing=[Existing(BL.BL_User_1, (30, 30))])
+
+    assert overlay.place_overlays(
+        board,  # type: ignore[arg-type]
+        [],
+        PLACEMENT,
+        ("User.1",),
+        "label",
+    )
+
+    assert board.calls == []
+
+
+def test_previous_overlays_are_found_at_the_board_placement(tmp_path, monkeypatch):
+    # The new images' own placement plays no part: an untagged old overlay
+    # counts by where the board puts overlays.
+    monkeypatch.setattr(overlay, "create_checked", lambda board, items: None)
+    elsewhere = overlay.image_placement((5, 5), (10, 10), 0.1)
+    board = ImageBoard(existing=[Existing(BL.BL_User_1, elsewhere.centre)])
+
+    overlay.place_overlays(
+        board,  # type: ignore[arg-type]
+        [image(tmp_path)],
+        elsewhere,
+        ("User.1",),
+        "label",
+    )
+
+    assert ("remove_items", 1) in board.calls
 
 
 class ClearBoard:

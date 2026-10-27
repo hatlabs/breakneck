@@ -17,9 +17,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 from matplotlib.patches import Circle
+from scipy import ndimage
 
 from breakneck.overlay import OVERLAY_PPI, OVERLAY_TAG
-from breakneck.raster import CoverageMap, Grid
+from breakneck.raster import BoolMap, CoverageMap, Grid
 from breakneck.snapshot import Point2, Snapshot
 
 BACKGROUND = "#101010"
@@ -27,12 +28,15 @@ OUTLINE_COLOUR = "#888888"
 UNFIXABLE_COLOUR = "cyan"
 MARKER_COLOUR = "white"
 RING_LINE_WIDTH = 0.8
+CONTOUR_LINE_WIDTH = 0.8
+# A served pixel is on the overlay contour when an edge neighbour is not.
+CONTOUR_NEIGHBOURS = ndimage.generate_binary_structure(2, 1)
 CROSS_SIZE = 5
 CROSS_LINE_WIDTH = 1.2
 # Two pixels, so a ring stays visible on the board zoomed out.
 OVERLAY_RING_WIDTH_MM = 0.2
-# Neutral, so copper no via can reach reads apart from the distance scale.
-UNSTITCHABLE_COLOUR = "#a0a0a0"
+# Neutral, so excluded copper reads apart from the distance scale.
+EXCLUDED_COLOUR = "#a0a0a0"
 PANEL_COLUMNS = 2
 PANEL_INCHES = 8
 PANEL_DPI = 100
@@ -40,11 +44,20 @@ MARGIN_MM = 0.5
 
 
 @dataclass(frozen=True)
+class Contour:
+    """A line at `margin` beyond the distance, between copper on either side."""
+
+    colour: str
+    margin: float = 0.0
+
+
+@dataclass(frozen=True)
 class HeatmapStyle:
     """A command's look; `colourbar_label` may use `{distance}`.
 
-    Without an over colour, values above the scale saturate at its top.
-    Unreachable copper (infinite distance) has its own colour.
+    The colour scale runs from 0 to `scale` × the distance. Without an over
+    colour, values above it saturate at its top. Unreachable copper
+    (infinite distance) has its own colour.
     """
 
     title: str
@@ -53,6 +66,8 @@ class HeatmapStyle:
     colormap: str
     over_colour: str | None
     unreachable_colour: str
+    scale: float = 1.0
+    contour: Contour | None = None
 
 
 Disc = tuple[Point2, float]
@@ -84,6 +99,29 @@ def _colormap(style: HeatmapStyle) -> matplotlib.colors.Colormap:
     return cmap
 
 
+def colourbar_extend(
+    maps: Sequence[CoverageMap], distance: float, style: HeatmapStyle
+) -> str:
+    """Colourbar `extend`: "max" when its over triangle stands for copper.
+
+    An over colour always gets its triangle, as the legend for it; a
+    saturating scale gets one only where copper lies beyond its top.
+    """
+    if style.over_colour is not None:
+        return "max"
+    top = style.scale * distance
+    beyond = any(
+        np.any(np.isfinite(m.distance) & (m.distance > top) & ~m.excluded) for m in maps
+    )
+    return "max" if beyond else "neither"
+
+
+def _contour_pixels(m: CoverageMap, level: float) -> BoolMap:
+    """Copper within `level` with an edge neighbour beyond it."""
+    served = (m.distance <= level) & ~m.excluded
+    return served & ndimage.binary_dilation(m.uncovered(level), CONTOUR_NEIGHBOURS)
+
+
 def _rgba_bytes(colour: str) -> npt.NDArray[np.uint8]:
     return np.round(matplotlib.colors.to_rgba_array(colour)[0] * 255).astype(np.uint8)
 
@@ -91,7 +129,7 @@ def _rgba_bytes(colour: str) -> npt.NDArray[np.uint8]:
 def _same(a: CoverageMap, b: CoverageMap) -> bool:
     return bool(
         np.array_equal(a.distance, b.distance, equal_nan=True)
-        and np.array_equal(a.unstitchable, b.unstitchable)
+        and np.array_equal(a.excluded, b.excluded)
     )
 
 
@@ -143,6 +181,7 @@ def render_panels(
     shown = panels(maps)
     if not shown:
         return
+    path.parent.mkdir(parents=True, exist_ok=True)
     rows = math.ceil(len(shown) / PANEL_COLUMNS)
     cols = min(PANEL_COLUMNS, len(shown))
     x0, y0 = grid.x0, grid.y0
@@ -156,7 +195,7 @@ def render_panels(
     )
     fig.patch.set_facecolor(BACKGROUND)
     cmap = _colormap(style)
-    grey = matplotlib.colors.ListedColormap([UNSTITCHABLE_COLOUR])
+    grey = matplotlib.colors.ListedColormap([EXCLUDED_COLOUR])
     unreachable = matplotlib.colors.ListedColormap([style.unreachable_colour])
     image = None
     for ax in axs.ravel()[len(shown) :]:
@@ -166,17 +205,24 @@ def render_panels(
         extent = (x0, x1, y1, y0)
         # imshow draws non-finite values as background, so copper no seed
         # reaches (inf) gets a layer of its own.
-        lost = np.isinf(m.distance) & ~m.unstitchable
+        lost = np.isinf(m.distance) & ~m.excluded
         image = ax.imshow(
-            np.ma.masked_where(
-                m.unstitchable | lost | np.isnan(m.distance), m.distance
-            ),
+            np.ma.masked_where(m.excluded | lost | np.isnan(m.distance), m.distance),
             cmap=cmap,
             vmin=0,
-            vmax=distance,
+            vmax=style.scale * distance,
             extent=extent,
             interpolation="nearest",
         )
+        if style.contour is not None:
+            ax.contour(
+                grid.xs,
+                grid.ys,
+                np.ma.masked_where(~np.isfinite(m.distance) | m.excluded, m.distance),
+                levels=[distance + style.contour.margin],
+                colors=[style.contour.colour],
+                linewidths=CONTOUR_LINE_WIDTH,
+            )
         ax.imshow(
             np.ma.masked_where(~lost, lost),
             cmap=unreachable,
@@ -184,7 +230,7 @@ def render_panels(
             interpolation="nearest",
         )
         ax.imshow(
-            np.ma.masked_where(~m.unstitchable, m.unstitchable),
+            np.ma.masked_where(~m.excluded, m.excluded),
             cmap=grey,
             extent=extent,
             interpolation="nearest",
@@ -219,7 +265,12 @@ def render_panels(
         ax.set_yticks([])
     assert image is not None
     cb = fig.colorbar(
-        image, ax=axs, orientation="horizontal", fraction=0.03, pad=0.03, extend="max"
+        image,
+        ax=axs,
+        orientation="horizontal",
+        fraction=0.03,
+        pad=0.03,
+        extend=colourbar_extend(maps, distance, style),
     )
     cb.set_label(style.colourbar_label.format(distance=distance), color="white")
     cb.ax.tick_params(colors="white")
@@ -255,13 +306,16 @@ def overlay_rgba(
     shape = maps[0].distance.shape
     rgba = np.zeros((*shape, 4), np.uint8)
     cmap = _colormap(style)
-    norm = matplotlib.colors.Normalize(vmin=0, vmax=distance)
+    norm = matplotlib.colors.Normalize(vmin=0, vmax=style.scale * distance)
     for m in maps:
         inside = ~np.isnan(m.distance)
         colours = cmap(norm(np.where(inside, m.distance, 0)), bytes=True)
         rgba[inside] = colours[inside]
         rgba[np.isinf(m.distance)] = _rgba_bytes(style.unreachable_colour)
-        rgba[m.unstitchable] = _rgba_bytes(UNSTITCHABLE_COLOUR)
+        rgba[m.excluded] = _rgba_bytes(EXCLUDED_COLOUR)
+        if style.contour is not None:
+            level = distance + style.contour.margin
+            rgba[_contour_pixels(m, level)] = _rgba_bytes(style.contour.colour)
     rings = {r for m in maps for r in markers.get((m.net, m.layer), NO_MARKERS).rings}
     for centre, radius in rings:
         _draw_ring(rgba, grid, centre, radius)

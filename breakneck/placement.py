@@ -9,11 +9,12 @@ from pathlib import Path
 from typing import TypeVar
 
 import kipy
+import kipy.board
 from loguru import logger
 
 from breakneck import drc
 from breakneck.commit import Marker, MarkerKind, commit_units, refill_tolerant
-from breakneck.plan import Planner
+from breakneck.plan import Plan, Planner
 from breakneck.snapshot import Snapshot
 
 OptionsT = TypeVar("OptionsT")
@@ -44,6 +45,13 @@ class BoardChangedError(RuntimeError):
 class RunResult:
     snapshot: Snapshot
     prune: drc.PruneResult
+
+
+def measure_only(kicad: kipy.KiCad, board: kipy.board.Board) -> tuple[Snapshot, Plan]:
+    """The refilled board and an empty plan, for a run that places nothing."""
+    if not refill_tolerant(kicad, board):
+        logger.warning("Zone refill not confirmed; fills may be stale")
+    return Snapshot.from_board(board), Plan()
 
 
 def markers_for(
