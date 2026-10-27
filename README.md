@@ -132,6 +132,8 @@ After `padvia`, stitch the pours in three steps, with checks by hand between the
 2. `returnvia`. It gives every via on a non-ground net a return, the power stitching vias from step 1 included. Fix the vias it reports by hand, refill the zones and confirm with `returnvia --check`.
 3. `pourstitch`. It counts the return vias already on the board as ground stitches, so it adds ground vias only where they leave gaps.
 
+Finish with `pourstitch --power --check`, with `--render` or `--overlay`, and `returnvia --check`. The power check is repeated because steps 2 and 3 place GND vias inside the outer-layer power pours, which can lengthen paths through power fingers.
+
 Power stitching goes first because its vias need returns, and ground stitching goes last because the return vias count towards it. Every via placed punches a hole in other nets' pours and can create new narrow spots, so after later hand edits, repeat the `--check` runs.
 
 Notes:
