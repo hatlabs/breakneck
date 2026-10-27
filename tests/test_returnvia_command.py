@@ -329,7 +329,7 @@ def test_track_over_a_slot_in_its_plane_is_unreachable(fakes, tmp_path: Path):
     assert at(rgba(tmp_path / "returnvia-B_Cu.png"), ON_TRACK) != unreachable
 
 
-def test_track_outside_every_ground_outline_is_unreachable(fakes, tmp_path: Path):
+def test_track_outside_every_ground_outline_is_blank(fakes, tmp_path: Path):
     right = box(4, 0, 20, 10)
     fills = right.difference(antipads(SIG))
     zones = [gnd_zone({L: fills for L in INNER}, outline=right)]
@@ -337,9 +337,28 @@ def test_track_outside_every_ground_outline_is_unreachable(fakes, tmp_path: Path
 
     run(Board(), tmp_path)
 
-    unreachable = colour(STYLE.unreachable_colour)
-    assert at(rgba(tmp_path / "returnvia-F_Cu.png"), ON_TRACK) == unreachable
-    assert at(rgba(tmp_path / "returnvia-F_Cu.png"), (4.3, SIG[1])) != unreachable
+    image = rgba(tmp_path / "returnvia-F_Cu.png")
+    assert at(image, ON_TRACK)[3] == 0
+    assert at(image, (4.3, SIG[1]))[3] == 255
+    assert at(image, (4.3, SIG[1])) != colour(STYLE.unreachable_colour)
+
+
+def test_two_layer_board_leaves_the_unreferenced_layer_blank(fakes, tmp_path):
+    # GND pours only B.Cu: F.Cu references it, B.Cu has no reference layer.
+    pour = BOARD.difference(antipads(SIG))
+    snap = snapshot(returns=[("GND", (4.0, 5.0))], zones=[gnd_zone({"B.Cu": pour})])
+    snap.copper_layers = ("F.Cu", "B.Cu")
+    fakes.snap = snap
+
+    run(Board(), tmp_path)
+
+    back = rgba(tmp_path / "returnvia-B_Cu.png")
+    assert at(back, (15.0, 8.0))[3] == 0
+    assert at(back, ON_TRACK)[3] == 0
+    assert at(back, (SIG[0], SIG[1] - DISTANCE)) == RING
+    front = rgba(tmp_path / "returnvia-F_Cu.png")
+    assert at(front, ON_TRACK) != colour(STYLE.unreachable_colour)
+    assert at(front, ON_TRACK)[3] == 255
 
 
 def test_every_nets_copper_is_shown(fakes, tmp_path: Path):

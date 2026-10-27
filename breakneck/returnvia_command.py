@@ -129,17 +129,18 @@ def copper_map(fields: ReturnFields, layer: str, grounds: Sequence[str]) -> Cove
     """The return field of each pixel's reference plane, on `layer`'s copper.
 
     A pixel's reference is chosen as for a via end there. Copper over a void
-    in that plane, or outside every ground outline, has no return path.
+    in that plane has no return path. Copper outside every other layer's
+    ground outline has no reference plane to measure and is left blank, as
+    on a two-layer board's ground layer.
     """
     grid = fields.grid
     # Every pixel a track touches, so thin tracks stay unbroken.
     copper = grid.touching(layer_copper(fields.snapshot, layer, grounds))
-    dist = np.where(copper, np.inf, np.nan)
+    dist = np.full(grid.shape, np.nan)
     unassigned = copper.copy()
     for plane, outline in reference_outlines(fields.snapshot, layer, grounds):
         here = unassigned & grid.mask(outline)
-        on_fill = here & fields.fill(plane)
-        dist[on_fill] = fields.field(plane)[on_fill]
+        dist[here] = np.where(fields.fill(plane), fields.field(plane), np.inf)[here]
         unassigned &= ~here
     return CoverageMap(COPPER_MAP_NET, layer, dist, np.zeros(grid.shape, bool))
 
