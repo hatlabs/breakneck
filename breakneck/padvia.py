@@ -4,8 +4,10 @@ A pad is a candidate when its own net has fill on another copper layer that a
 via of the net's size fits in within the planner's reach of the pad; explicit
 nets narrow that selection.
 
-A pad is served when a same-net via lies within `SERVED_DISTANCE` of it and
-is reached through the pad's same-net tracks, pads or pour on the pad's layer.
+A pad is served when a same-net via or through-hole pad lies within
+`SERVED_DISTANCE` of it and is reached through the pad's same-net tracks, pads
+or pour on the pad's layer. Both distances run copper edge to copper edge on
+the pad's layer: the via's disk, the through-hole pad's copper there.
 For an unserved pad the planner scans `DIRECTIONS` rays from the pad centre,
 takes the first legal spot on each and keeps the one with the shortest stub,
 penalising rays that point back toward the footprint centre.
@@ -103,10 +105,23 @@ def _connected_region(obstacles: Obstacles, pad: Pad, layer: str) -> BaseGeometr
         region = grown
 
 
-def _is_served(obstacles: Obstacles, pad: Pad, layer: str) -> bool:
+def _through_copper(obstacles: Obstacles, pad: Pad, layer: str) -> list[BaseGeometry]:
+    """Same-net vias, and same-net PTH pads' copper on `layer`: both join
+    every copper layer."""
     shape = pad.shapes[layer]
     vias = obstacles.nearby_copper(shape, SERVED_DISTANCE, pad.net, None)
-    near = [g for g in vias if g.distance(shape) <= SERVED_DISTANCE]
+    pins = [
+        p.shapes[layer]
+        for p in obstacles.snapshot.pads
+        if p.kind is PadKind.PTH and p.net == pad.net and layer in p.shapes
+    ]
+    return vias + pins
+
+
+def _is_served(obstacles: Obstacles, pad: Pad, layer: str) -> bool:
+    shape = pad.shapes[layer]
+    through = _through_copper(obstacles, pad, layer)
+    near = [g for g in through if g.distance(shape) <= SERVED_DISTANCE]
     if not near:
         return False
     region = _connected_region(obstacles, pad, layer)

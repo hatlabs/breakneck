@@ -275,6 +275,53 @@ def test_connected_via_beyond_served_distance_does_not_serve():
     assert len(plan.units) == 1
 
 
+def pth(net, centre, size=1.7, drill=1.0):
+    x, y = centre
+    copper = box(x - size / 2, y - size / 2, x + size / 2, y + size / 2)
+    return Pad(
+        id=f"pth-{net}@{x},{y}",
+        footprint_id=None,
+        net=net,
+        kind=PadKind.PTH,
+        number="1",
+        position=centre,
+        drill=drill,
+        shapes={L: copper for L in FOUR_LAYERS},
+    )
+
+
+def test_pad_joined_through_pour_to_a_nearby_same_net_pth_pad_is_served():
+    # The pads' copper is 0.19 mm apart, like a decoupling cap's GND pad next
+    # to a connector's GND pin.
+    p = pad("GND", CENTRE)
+    pin = pth("GND", (10.0 + 0.25 + 0.19 + 0.85, 10.0))
+
+    plan = plan_padvia(snapshot([p, pin]), GND, [])
+
+    assert plan.units == ()
+    assert plan.unfixable == ()
+
+
+def test_nearby_pth_pad_of_another_net_does_not_serve():
+    # Farther than the GND pair above: a SIG pin 0.19 mm away would leave no
+    # room for any stub. Still within the served distance.
+    p = pad("GND", CENTRE)
+    pin = pth("SIG", (10.0 + 0.25 + 0.6 + 0.85, 10.0))
+
+    plan = plan_padvia(snapshot([p, pin]), GND, [])
+
+    assert len(plan.units) == 1
+
+
+def test_same_net_pth_pad_beyond_served_distance_does_not_serve():
+    p = pad("GND", CENTRE)
+    pin = pth("GND", (10.0 + 0.25 + 1.1 + 0.85, 10.0))
+
+    plan = plan_padvia(snapshot([p, pin]), GND, [])
+
+    assert len(plan.units) == 1
+
+
 # ---- obstacles -------------------------------------------------------------------
 
 
