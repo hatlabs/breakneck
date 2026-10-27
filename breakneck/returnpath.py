@@ -162,6 +162,20 @@ class ReturnFields:
         hops = np.hypot(g.xs[win[1]][cc] - position[0], g.ys[win[0]][rr] - position[1])
         return float(np.min(self.field(plane)[win][rr, cc] + hops))
 
+    def void(
+        self, position: Point2, plane: ReferencePlane, distance: float
+    ) -> tuple[tuple[slice, slice], BoolMap] | None:
+        """The window around `position` and the void in `plane`'s fill that
+        contains it, within `distance`: the antipad `distance_at` hops
+        across. None off the grid."""
+        g = self.grid
+        centre = g.index(position)
+        if not g.contains(centre):
+            return None
+        win, near = g.disc(centre, distance)
+        local = (centre[0] - win[0].start, centre[1] - win[1].start)
+        return win, _void(self.fill(plane)[win], near, local)
+
     def measure(
         self, references: Iterable[ViaReferences], distance: float
     ) -> list[PlaneReturn]:
@@ -205,14 +219,22 @@ class ReturnFields:
         return out
 
 
+def _void(fill: BoolMap, near: BoolMap, centre: Pixel) -> BoolMap:
+    """The non-fill region containing `centre`, within `near`; empty when
+    `centre` is on fill."""
+    if fill[centre]:
+        return np.zeros_like(fill)
+    labels, _ = ndimage.label(~fill & near, VOID_CONNECTIVITY)
+    return labels == labels[centre]
+
+
 def _void_edge(fill: BoolMap, near: BoolMap, centre: Pixel) -> BoolMap:
     """Fill pixels next to the void containing `centre`, within `near`."""
     if fill[centre]:
         edge = np.zeros_like(fill)
         edge[centre] = True
         return edge
-    labels, _ = ndimage.label(~fill & near, VOID_CONNECTIVITY)
-    void = labels == labels[centre]
+    void = _void(fill, near, centre)
     return ndimage.binary_dilation(void, ADJACENT) & fill & near
 
 

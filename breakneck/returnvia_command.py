@@ -18,7 +18,7 @@ from shapely.ops import unary_union
 from breakneck import overlay, render
 from breakneck.placement import RunSettings, measure_only, run_placement
 from breakneck.plan import QUANTISATION, PlannedUnit
-from breakneck.raster import CoverageMap, Grid
+from breakneck.raster import BoolMap, CoverageMap, Grid
 from breakneck.returnpath import (
     NoBoardOutlineError,
     Outcome,
@@ -26,7 +26,6 @@ from breakneck.returnpath import (
     ReturnFields,
 )
 from breakneck.returnvia import (
-    ReferencePlane,
     ReturnViaOptions,
     ViaReferences,
     plan_return_vias,
@@ -163,27 +162,18 @@ def copper_maps(
     ]
 
 
-def antipad(
-    fields: ReturnFields, copper: BaseGeometry, plane: ReferencePlane
-) -> BaseGeometry:
-    """`copper` grown to the edge of its clearance hole in `plane`'s fill,
-    which the plane's field leaves as a void."""
-    fill = fields.snapshot.fill(plane.ground, plane.layer)
-    return copper.buffer(fill.distance(copper))
-
-
 @dataclasses.dataclass(frozen=True)
 class End:
-    """Copper that changes layers, its clearance hole in the reference
-    plane and its return distance."""
+    """Copper that changes layers, its return distance, and its void in the
+    reference plane's fill as a window and a mask in it."""
 
     copper: BaseGeometry
-    hole: BaseGeometry
+    void: tuple[tuple[slice, slice], BoolMap]
     distance: float
 
 
 def via_ends(
-    layer: str, results: Sequence[PlaneReturn], fields: ReturnFields
+    layer: str, results: Sequence[PlaneReturn], fields: ReturnFields, distance: float
 ) -> list[End]:
     """The measured via ends on `layer`."""
     diameters = {(v.position, v.net): v.diameter for v in fields.snapshot.vias}
@@ -192,8 +182,10 @@ def via_ends(
         if layer not in r.layers or r.outcome is not Outcome.MEASURED:
             continue
         assert r.plane is not None
+        void = fields.void(r.position, r.plane, distance)
+        assert void is not None
         via = Point(r.position).buffer(diameters[(r.position, r.net)] / 2)
-        out.append(End(via, antipad(fields, via, r.plane), r.distance))
+        out.append(End(via, void, r.distance))
     return out
 
 
@@ -215,19 +207,21 @@ def pad_ends(
         found = plane and fields.distance_at(p.position, plane, distance)
         if plane is None or found is None:
             continue
-        copper = p.shapes[layer]
-        out.append(End(copper, antipad(fields, copper, plane), found))
+        void = fields.void(p.position, plane, distance)
+        assert void is not None
+        out.append(End(p.shapes[layer], void, found))
     return out
 
 
 def paint_ends(m: CoverageMap, grid: Grid, ends: Sequence[End]) -> None:
     """Show each end's distance over its copper and over the layer's copper
-    in its hole, which the plane's field leaves as a void. The copper goes
-    on top, so a neighbour's hole never covers it."""
+    in its void that the plane's field leaves unreachable; copper the field
+    reaches, such as a return's own, keeps its reading. The end's copper goes
+    on top, so a neighbour's void never covers it."""
     for e in ends:
-        win = grid.bounds_window(e.hole.bounds)
-        on_copper = grid.mask(e.hole, win) & ~np.isnan(m.distance[win])
-        m.distance[win][on_copper] = e.distance
+        win, void = e.void
+        unreachable = void & np.isinf(m.distance[win])
+        m.distance[win][unreachable] = e.distance
     for e in ends:
         win = grid.bounds_window(e.copper.bounds)
         m.distance[win][grid.mask(e.copper, win)] = e.distance
@@ -340,7 +334,7 @@ def execute(
     for m in maps:
         ends = [
             *pad_ends(m.layer, fields, grounds, options.distance),
-            *via_ends(m.layer, results, fields),
+            *via_ends(m.layer, results, fields, options.distance),
         ]
         paint_ends(m, fields.grid, ends)
     marks = markers(results, maps, options.distance)

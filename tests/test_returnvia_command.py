@@ -515,6 +515,25 @@ def test_via_end_shows_its_measured_distance_over_its_antipad(fakes, reach):
     assert at(image, off_copper)[3] == 0
 
 
+def test_via_end_shows_its_distance_over_its_whole_void(fakes):
+    # A row's merged antipads leave one void stretching east of the via, with
+    # fill nearer than its far end: the via's own track runs along it.
+    void = LineString([SIG, (SIG[0] + 2, SIG[1])]).buffer(WIDE_ANTIPAD)
+    plain = BOARD.difference(void)
+    snap = snapshot(
+        returns=[("GND", (9.5, 5.0))], zones=[gnd_zone({L: plain for L in INNER})]
+    )
+    along = Track("along", "SIG", "F.Cu", 0.2, LineString([SIG, (8.5, SIG[1])]))
+    snap.tracks = [*snap.tracks, along]
+    fakes.snap = snap
+
+    run(Board(), overlay=True, full_map=True)
+
+    beyond_nearest_fill = (SIG[0] + 1.2, SIG[1])
+    (expected,) = palette_at(front_return(snap))
+    assert at(rgba(fakes, "F.Cu"), beyond_nearest_fill) == expected
+
+
 def test_via_shows_its_own_distance_over_a_neighbours_antipad(fakes):
     # Merged antipads: each via lies inside the other's clearance hole.
     east = (SIG[0] + 0.8, SIG[1])
