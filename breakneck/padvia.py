@@ -1,7 +1,8 @@
 """Plan a via plus stub for every unserved SMD pad of the stitched nets.
 
-A pad is a candidate when its own net has fill within the planner's reach of it
-on another copper layer; explicit nets narrow that selection.
+A pad is a candidate when its own net has fill on another copper layer that a
+via of the net's size fits in within the planner's reach of the pad; explicit
+nets narrow that selection.
 
 A pad is served when a same-net via lies within `SERVED_DISTANCE` of it and
 is reached through the pad's same-net tracks, pads or pour on the pad's layer.
@@ -13,7 +14,7 @@ penalising rays that point back toward the footprint centre.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import shapely
@@ -36,10 +37,13 @@ INWARD_PENALTY = 0.4
 MIN_STUB_WIDTH = 0.2
 MAX_STUB_WIDTH = 0.4
 MIN_OUTWARD_LENGTH = 1e-6
-# How far from the pad edge the planner can reach fill: it clears the pad,
-# possibly overshooting by one step, then searches a stub's length.
+# How far past its own radius from the pad edge the planner can put a via
+# centre: it clears the pad by the gap, possibly overshooting by one step, then
+# searches a stub's length.
 FILL_REACH = OWN_PAD_GAP + CLEARING_STEP + MAX_STUB
 POSITION_DECIMALS = 3
+
+RoomCache = dict[tuple[str, str], BaseGeometry]
 
 
 @dataclass(frozen=True)
@@ -114,39 +118,66 @@ def _own_layer(pad: Pad) -> str:
     return layer
 
 
-def _over_own_fill_elsewhere(snapshot: Snapshot, pad: Pad) -> bool:
-    """The pad's net has fill within the planner's reach of it on another layer.
+def _via_size(snapshot: Snapshot, options: PadviaOptions, net: str) -> ViaSize:
+    return options.via or snapshot.via_size(net)
+
+
+def _room_for_via(
+    snapshot: Snapshot, net: str, layer: str, r: float, cache: RoomCache
+) -> BaseGeometry:
+    """Where a via centre of radius `r` can sit with its disk inside the fill."""
+    key = (net, layer)
+    if key not in cache:
+        cache[key] = snapshot.fill(net, layer).buffer(-r)
+    return cache[key]
+
+
+def _via_fits_own_fill_elsewhere(
+    snapshot: Snapshot, pad: Pad, size: ViaSize, cache: RoomCache
+) -> bool:
+    """A via within the planner's reach of the pad can sit in the pad's net's
+    fill on another copper layer.
+
+    The planner puts the via centre at most `r + FILL_REACH` from the pad
+    copper, and the via disk lies inside the fill exactly when its centre lies
+    inside the fill eroded by `r`; so the eroded fill must come within
+    `r + FILL_REACH` of the pad copper. Fill narrower than the via, such as a
+    sliver left under a same-net track, never qualifies.
 
     The fill, not the zone outline: a higher-priority zone of another net can
     own the copper under the pad, and no via there would reach the net.
     """
     layer = _own_layer(pad)
     copper = pad.shapes[layer]
-    return any(
-        z.net == pad.net
-        and any(
-            L != layer and fill.distance(copper) <= FILL_REACH
-            for L, fill in z.fills.items()
-        )
-        for z in snapshot.copper_zones
-    )
+    r = size.diameter / 2
+    for other in snapshot.copper_layers:
+        if other == layer:
+            continue
+        room = _room_for_via(snapshot, pad.net, other, r, cache)
+        if not room.is_empty and room.distance(copper) <= r + FILL_REACH:
+            return True
+    return False
 
 
-def _candidates(snapshot: Snapshot, nets: Iterable[str] | None) -> list[Pad]:
+def _candidates(snapshot: Snapshot, options: PadviaOptions) -> list[Pad]:
+    cache: RoomCache = {}
     pads = [
         p
         for p in snapshot.pads
         if p.kind == PadKind.SMD
         and len(p.shapes) == 1
-        and _over_own_fill_elsewhere(snapshot, p)
+        and _via_fits_own_fill_elsewhere(
+            snapshot, p, _via_size(snapshot, options, p.net), cache
+        )
     ]
+    nets = options.nets
     derived = nets is None
     if derived:
         nets = sorted({p.net for p in pads})
     stitchable, _ = snapshot.split_stitchable(nets)
     if derived:
         logger.info(
-            "padvia: nets with fill near their pads on another layer: "
+            "padvia: nets with via-sized fill near their pads on another layer: "
             + (", ".join(sorted(stitchable)) or "none")
         )
     return sorted((p for p in pads if p.net in stitchable), key=lambda p: p.position)
@@ -214,12 +245,12 @@ def plan_padvia(
     obstacles = Obstacles(snapshot, forbidden)
     units: list[PlannedUnit] = []
     unfixable: list[UnfixableSpot] = []
-    candidates = _candidates(snapshot, options.nets)
+    candidates = _candidates(snapshot, options)
     for pad in candidates:
         layer = _own_layer(pad)
         if _is_served(obstacles, pad, layer):
             continue
-        size = options.via or snapshot.via_size(pad.net)
+        size = _via_size(snapshot, options, pad.net)
         unit = _plan_pad(obstacles, pad, size, _outward(snapshot, pad))
         if unit is None:
             c = pad.shapes[layer].centroid

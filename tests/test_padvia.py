@@ -371,20 +371,14 @@ def test_net_with_zone_on_one_layer_only_is_skipped():
 
 
 def test_via_must_sit_inside_fill_on_required_layers_other_than_pad_layer():
-    # A strip of fill within reach makes the pad a candidate, but it is too
-    # narrow for any via to sit inside it.
+    # B.Cu fill within reach makes the pad a candidate, but In1.Cu, also inside
+    # the zone, has only a strip there too narrow for any via to sit inside.
     x, y = CENTRE
     sliver = box(x + 0.9, y - 2, x + 1.0, y + 2)
-    back_fill = BOARD.difference(Point(CENTRE).buffer(3.0)).union(sliver)
-    zones = [
-        Zone(
-            net="GND",
-            layers=("F.Cu", "B.Cu"),
-            priority=0,
-            outline=BOARD,
-            fills={"F.Cu": BOARD, "B.Cu": back_fill},
-        )
-    ]
+    inner_fill = BOARD.difference(Point(CENTRE).buffer(3.0)).union(sliver)
+    layers = ("F.Cu", "In1.Cu", "B.Cu")
+    fills = {"F.Cu": BOARD, "In1.Cu": inner_fill, "B.Cu": BOARD}
+    zones = [zone("GND", layers, fills=fills)]
 
     plan = plan_padvia(snapshot([pad("GND", CENTRE)], zones=zones), GND, [])
 
@@ -392,11 +386,12 @@ def test_via_must_sit_inside_fill_on_required_layers_other_than_pad_layer():
     assert len(plan.unfixable) == 1
 
 
-def test_via_outside_second_zone_outline_is_unfixable():
+def test_via_outside_the_pad_layer_zone_outline_is_unfixable():
+    # Only B.Cu's zone would hold the via: one zone layer is not enough.
     x, y = CENTRE
     zones = [
-        zone("GND", ("F.Cu",)),
-        zone("GND", ("B.Cu",), outline=box(x - 0.1, y - 0.1, x + 0.1, y + 0.1)),
+        zone("GND", ("F.Cu",), outline=box(x - 0.3, y - 0.3, x + 0.3, y + 0.3)),
+        zone("GND", ("B.Cu",)),
     ]
 
     plan = plan_padvia(snapshot([pad("GND", CENTRE)], zones=zones), GND, [])
@@ -514,7 +509,8 @@ def test_without_nets_a_pad_over_its_net_zone_on_another_layer_is_selected(log):
 
     assert len(plan.units) == 1
     assert any(
-        "padvia: nets with fill near their pads on another layer: GND" in m for m in log
+        "padvia: nets with via-sized fill near their pads on another layer: GND" in m
+        for m in log
     )
 
 
@@ -600,3 +596,51 @@ def test_without_nets_fill_just_past_the_stub_length_still_selects_the_pad():
     plan = plan_padvia(snapshot([pad("GND", CENTRE)], zones=zones), ALL_NETS, [])
 
     assert len(plan.units) == 1
+
+
+# ---- fill a via fits in ----------------------------------------------------------
+
+# A ~0.5 mm wide B.Cu sliver of a board-wide +3.3V zone's fill under a +3.3V
+# track, 1.1 mm east of a +3.3V pad on F.Cu: narrower than a via.
+SLIVER = box(10.25 + 1.1, 7.5, 10.25 + 1.6, 12.5)
+
+
+def sliver_zones():
+    return [
+        zone("GND", ("F.Cu", "B.Cu")),
+        zone(
+            "+3.3V",
+            ("F.Cu", "B.Cu"),
+            fills={"F.Cu": box(20, 0, 30, 20), "B.Cu": SLIVER},
+        ),
+    ]
+
+
+def test_fill_narrower_than_a_via_within_reach_does_not_select_the_pad():
+    snap = snapshot([pad("+3.3V", CENTRE)], zones=sliver_zones())
+
+    plan = plan_padvia(snap, ALL_NETS, [])
+
+    assert plan.units == ()
+    assert plan.unfixable == ()
+
+
+def test_fill_wide_enough_for_the_via_override_selects_the_pad():
+    small = ViaSize(0.4, 0.2)
+    snap = snapshot([pad("+3.3V", CENTRE)], zones=sliver_zones())
+
+    plan = plan_padvia(snap, PadviaOptions(via=small), [])
+
+    (unit,) = plan.units
+    assert SLIVER.contains(Point(unit.position).buffer(small.diameter / 2))
+
+
+def test_four_layers_net_fill_only_on_the_far_outer_layer_selects_the_pad():
+    # +3.3V on F.Cu over a GND In1.Cu: the via passes the GND plane to reach
+    # the +3.3V pour on B.Cu.
+    zones = [zone("GND", ("In1.Cu",)), zone("+3.3V", ("F.Cu", "B.Cu"))]
+
+    plan = plan_padvia(snapshot([pad("+3.3V", (5, 5))], zones=zones), ALL_NETS, [])
+
+    assert len(plan.units) == 1
+    assert plan.unfixable == ()

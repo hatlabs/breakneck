@@ -344,8 +344,9 @@ def parse_args():
         "--nets",
         nargs="+",
         metavar="NET",
-        help="Nets whose SMD pads get vias, among pads with their net's fill "
-        "within reach on another layer (default: every such net)",
+        help="Nets whose SMD pads get vias, among pads with their net's fill, "
+        "wide enough for a via, within reach on another layer "
+        "(default: every such net)",
     )
     padvia_parser.add_argument(
         "--via",
