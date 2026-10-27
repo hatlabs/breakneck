@@ -433,3 +433,13 @@ def test_without_nets_single_layer_pours_are_skipped_without_a_warning(log):
     PourStitcher()(snap, Options(nets=None, distance=D), [])
 
     assert not [m for m in log if "SW" in m and "skipping" in m]
+
+
+def test_named_single_layer_net_is_skipped_with_a_warning(log):
+    sw = Zone("SW", ("F.Cu",), 0, box(0, 0, 5, 5), {"F.Cu": box(0, 0, 5, 5)})
+    snap = pour_snapshot(box(0, 0, 10, 10))
+    snap = dataclasses.replace(snap, zones=[*snap.zones, sw])
+
+    PourStitcher()(snap, Options(nets=("SW",), distance=D), [])
+
+    assert [m for m in log if "SW" in m and "skipping" in m]
