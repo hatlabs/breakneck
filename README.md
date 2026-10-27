@@ -20,7 +20,7 @@ The planner places vias by the same measure. For each via and ground net with un
 
 Boards with isolated sections are supported: each end is measured against the ground net whose zone on its reference plane contains the via, so a via in a GND_ISO section gets a GND_ISO return, and a via whose ends reference GND and GND_ISO gets one of each. A via end outside every ground zone is reported, not served. So is an end whose plane has no ground fill within `--distance` of the via.
 
-The ground nets are the nets with zones on two or more inner layers. A board with no such net, such as a two-layer board or a stackup with one inner ground plane, uses the net named GND. Without a GND net, `returnvia` stops before changing anything and asks for `--ground-nets`. Vias on ground nets never need a return.
+The ground nets are the nets with zones on two or more inner layers. A board with no such net, such as a two-layer board or a stackup with one inner ground plane, uses the net named GND. Without a GND net, `returnvia` stops before changing anything and asks for `--ground-nets`. A net named in `--ground-nets` that has no zones, vias or pads on the board, usually a typo, gets a warning. Vias on ground nets never need a return.
 
 **Stackup assumption.** The plane next to a signal layer is taken to be a ground pour. In a SIG-GND-PWR-SIG stackup, B.Cu's real reference is the power plane on In2. With no ground zone on In2, B.Cu ends are measured on In1 instead. A board-wide low-priority GND zone under the power plane on In2 makes In2 the reference, but leaves B.Cu ends with no ground fill there, so every B.Cu end fails.
 

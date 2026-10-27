@@ -591,6 +591,13 @@ def test_ground_nets_override_detection():
     assert {u.net for u in as_power.units} == {NET}
 
 
+@pytest.mark.parametrize(("grounds", "warned"), [(("GDN",), True), ((NET,), False)])
+def test_misspelled_ground_net_is_warned_about(log, grounds, warned):
+    PourStitcher()(ground_and_power_snapshot(), ground(ground_nets=grounds), [])
+
+    assert bool([m for m in log if "GDN" in m and "no copper" in m]) is warned
+
+
 def no_ground_snapshot():
     return pours_snapshot({POWER_NET: box(0, 0, 20, 20), "VBAT": box(30, 0, 50, 20)})
 

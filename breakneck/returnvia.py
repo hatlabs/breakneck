@@ -44,7 +44,13 @@ def resolve_ground_nets(
     single-plane stackups never have; their ground is the net named GND.
     """
     if ground_nets:
-        return sorted(ground_nets)
+        named = sorted(ground_nets)
+        for n in named:
+            if not _has_copper(snapshot, n):
+                logger.warning(
+                    f"Ground net {n} has no zones, vias or pads on the board; check --ground-nets"
+                )
+        return named
     grounds = snapshot.default_ground_nets()
     if grounds:
         return grounds
