@@ -319,6 +319,49 @@ def test_full_map_shows_all_copper(fakes):
     assert at(rgba(fakes, "B.Cu"), ON_TRACK)[3] == 255
 
 
+def test_ring_only_map_agrees_with_the_full_map_inside_the_rings(fakes):
+    # An unserved via, a served neighbour and a signal pin within reach of
+    # its ring, and a via and pin far from it.
+    near_sig, far_sig = (SIG[0] + 1.2, SIG[1] + 1.2), (16.0, 5.0)
+    pin, far_pin = (SIG[0] - 1.0, SIG[1] + 1.5), (16.0, 8.0)
+    holes = unary_union(
+        [Point(p).buffer(ANTIPAD) for p in (SIG, near_sig, far_sig)]
+        + [Point(p).buffer(PIN_HOLE) for p in (pin, far_pin)]
+    )
+    flush = BOARD.difference(holes)
+    slot = box(SIG[0] + 0.6, SIG[1] - 2, SIG[0] + 0.7, SIG[1] + 0.5)
+    zones = [gnd_zone({"In1.Cu": flush.difference(slot), "In2.Cu": flush})]
+    snap = snapshot(
+        signals=(SIG, near_sig, far_sig),
+        returns=[("GND", (SIG[0] + 1.4, SIG[1])), ("GND", (17.0, 5.0))],
+        zones=zones,
+    )
+    snap.pads = [
+        Pad(
+            f"p{i}",
+            None,
+            "SIG",
+            PadKind.PTH,
+            "1",
+            p,
+            0.8,
+            {"F.Cu": Point(p).buffer(PIN_RADIUS)},
+        )
+        for i, p in enumerate((pin, far_pin))
+    ]
+    fakes.snap = snap
+
+    run(Board(), overlay=True)
+    ring_only = rgba(fakes, "F.Cu")
+    fakes.created.clear()
+    run(Board(), overlay=True, full_map=True)
+    full = rgba(fakes, "F.Cu")
+
+    shown = ring_only[..., 3] > 0
+    assert shown.sum() > 0
+    assert (ring_only[shown] == full[shown]).all()
+
+
 def test_no_unserved_via_gets_no_heatmap(fakes, tmp_path: Path):
     fakes.snap = snapshot(returns=[("GND", (6.0, 5.0))])
     board = Board()
