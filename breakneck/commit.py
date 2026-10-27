@@ -11,6 +11,7 @@ from datetime import datetime
 import kipy
 import kipy.board
 import kipy.board_types
+from kipy.common_types import Commit
 from kipy.errors import ApiError
 from kipy.errors import ConnectionError as KiCadConnectionError
 from kipy.geometry import Vector2
@@ -181,9 +182,24 @@ def commit_units(
         board.drop_commit(commit)
         raise
 
-    # Outside the try above: once pushed, the commit can't be dropped, and a
-    # lost or timed-out connection doesn't mean KiCad didn't land it. An
-    # ApiError is KiCad's answer, so nothing landed and the commit is dropped.
+    # Outside the try above: once pushed, the commit can't be dropped.
+    if push_tolerant(board, commit, label):
+        logger.info(
+            f"Committed {len(units)} vias as '{label}'"
+            + (f" and {len(markers)} markers on User.Eco2" if markers else "")
+        )
+
+    refill_after_commit(kicad, board)
+    return len(created)
+
+
+def push_tolerant(board: kipy.board.Board, commit: Commit, label: str) -> bool:
+    """Push the commit; True once KiCad confirms it landed.
+
+    A lost or timed-out connection doesn't mean KiCad didn't land it, so that
+    only warns. An ApiError is KiCad's answer, so nothing landed and the
+    commit is dropped.
+    """
     try:
         board.push_commit(commit, label)
     except KiCadConnectionError as e:
@@ -192,6 +208,7 @@ def commit_units(
             f"({e}); it may have landed. Check KiCad's undo history before "
             "running again"
         )
+        return False
     except ApiError as e:
         logger.error(f"KiCad refused to commit '{label}': {e}")
         board.drop_commit(commit)
@@ -199,12 +216,11 @@ def commit_units(
     except Exception as e:
         logger.error(f"Committing '{label}' failed: {e}")
         raise
-    else:
-        logger.info(
-            f"Committed {len(units)} vias as '{label}'"
-            + (f" and {len(markers)} markers on User.Eco2" if markers else "")
-        )
+    return True
 
+
+def refill_after_commit(kicad: kipy.KiCad, board: kipy.board.Board) -> None:
+    """Refill zones; a failure only warns, since the commit has landed."""
     try:
         refilled = refill_tolerant(kicad, board)
     except (ApiError, KiCadConnectionError) as e:
@@ -212,7 +228,6 @@ def commit_units(
         refilled = False
     if not refilled:
         logger.warning("Zone refill not confirmed; press B in KiCad to refill zones")
-    return len(created)
 
 
 def _busy(e: Exception) -> bool:
