@@ -12,6 +12,12 @@ Breakneck works on the board open in KiCad's PCB editor, through the KiCad IPC A
 
 A signal changing layers through a via also changes its reference plane, and its return current needs a ground via nearby to follow it. `returnvia` places a ground via within `--distance` (default 1.5 mm) of every via on a non-ground net that has none.
 
+| Before: `breakneck returnvia --check --overlay` | After: `breakneck returnvia --overlay` |
+|---|---|
+| ![Return distance heatmap on F.Cu before placing return vias, with many rings around unserved vias](docs/images/returnvia-before.png) | ![Return distance heatmap on F.Cu after placing return vias, with some rings left](docs/images/returnvia-after.png) |
+
+The return distance heatmap on F.Cu of a four-layer board, before and after placing return vias, following a `pourstitch --power` run. Each pink ring marks an unserved via end: one with no ground return within 1.5 mm through its reference plane. The rings left after the run mark the vias the planner couldn't serve; fix those by hand.
+
 **Reference planes.** A via end is a copper layer the via connects on: a same-net track, pad or fill touches it there. A via that connects on fewer than two layers carries no layer change and is exempt. Each end's reference plane is the nearest other copper layer in stack order with a ground zone outline at the via, the upper one of two equally near layers. Ends on the same plane are measured once.
 
 **Metric.** The return distance on a plane is the distance from the via's centre to the nearest return's centre through that plane's ground fill: a straight hop across the via's own antipad, then through the fill. Returns are the ground net's vias and through-hole pads with fill within reach of them. A return of GND does not serve a via whose plane is GND_ISO. A via end is served when its distance is at most `--distance` plus a 0.1 mm margin for the 0.1 mm raster. Paths on the raster run in eight directions, which overstates a straight run by up to about 8 % between them, so the effective straight-line limit depends on direction: about 1.46–1.65 mm at the default distance.
@@ -41,9 +47,21 @@ With Manhattan routing, outer-layer pours break up into narrow fingers. A regula
 
 Power pours are stitched sparsely. They need vias to join their layers, to carry their DC current and to reach their extremities, and a 10 mm distance gives that. More power vias cost more than they give: each one cuts an antipad into the ground planes it passes through, and each one is a via on a non-ground net that needs its own ground return. Where a power pour carries high current, check that it has enough vias for it and add more by hand.
 
+| Before: `breakneck pourstitch --power --check --overlay` | After: `breakneck pourstitch --power --overlay` |
+|---|---|
+| ![Power pour coverage on F.Cu before stitching, with pink areas beyond 10 mm](docs/images/power-before.png) | ![Power pour coverage on F.Cu after placing stitching vias](docs/images/power-after.png) |
+
+Power pour coverage on F.Cu. Pink copper is more than 10 mm from a stitching via, measured through the copper.
+
 Ground pours are stitched densely, so that the ground layers act as one reference and no ground finger is left to act as an antenna. At 3 mm the lattice pitch is about 4.2 mm, which is λ/20 at about 1.7 GHz in FR-4. That is not dense enough for RF: around an RF section, such as the surroundings of a 2.4 GHz module and its antenna feed, add ground vias by hand.
 
-It rasterises the pours at 0.1 mm, places vias on a square lattice of pitch D·√2, then fills the remaining gaps one at a time, starting with the point farthest from any via. Narrow spots get a smaller fallback via. `--render` and `--overlay` show the result as heatmaps (see below).
+| Before: `breakneck pourstitch --check --overlay` | After: `breakneck pourstitch --overlay` |
+|---|---|
+| ![Ground plane coverage on In1.Cu before stitching, with pink gaps between vias](docs/images/ground-before.png) | ![Ground plane coverage on In1.Cu after placing stitching vias](docs/images/ground-after.png) |
+
+Ground plane coverage on In1.Cu, following the `pourstitch --power` and `returnvia` runs above. Pink copper is more than 3 mm from a stitching via.
+
+`pourstitch` rasterises the pours at 0.1 mm, places vias on a square lattice of pitch D·√2, then fills the remaining gaps one at a time, starting with the point farthest from any via. Narrow spots get a smaller fallback via. `--render` and `--overlay` show the result as heatmaps (see below).
 
 ### Manual Neckdown
 
