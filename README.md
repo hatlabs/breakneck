@@ -90,16 +90,10 @@ To run breakneck without actually installing it:
 uvx breakneck <command> [options...]
 ```
 
-`padvia`, `cut` and `clear` run on the base install. `returnvia` and `pourstitch` need the `place` extra (scipy, scikit-image and matplotlib):
+To install breakneck as a tool:
 
 ```
-uvx --from 'breakneck[place]' breakneck <command> [options...]
-```
-
-To install breakneck as a tool, with the `place` extra for `returnvia` and `pourstitch`:
-
-```
-uv tool install 'breakneck[place]'
+uv tool install breakneck
 ```
 
 Breakneck needs KiCad 10 and kicad-python 0.8 or later.
