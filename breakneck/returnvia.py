@@ -1,8 +1,7 @@
 """Return vias: a ground via near every via on a non-ground net.
 
-Each via's reference planes are resolved here. Measuring the distance
-through them (`returnpath`) and planning by it (`returnvia_planner`) need
-the `place` extra.
+Each via's reference planes are resolved here; measuring the distance
+through them is `returnpath`'s job, and planning by it `returnvia_planner`'s.
 """
 
 from __future__ import annotations

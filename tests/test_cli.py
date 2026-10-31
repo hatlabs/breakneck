@@ -1,10 +1,10 @@
 import argparse
+import subprocess
 import sys
 
 import pytest
 from loguru import logger
 
-import breakneck
 from breakneck import cli, overlay, placement, pourstitch_command, returnvia_command
 from breakneck.cli import parse_via_size
 from breakneck.plan import (
@@ -266,35 +266,6 @@ def test_pourstitch_placement_failure_exits_cleanly(monkeypatch, error):
     assert exit_info.value.__suppress_context__
 
 
-@pytest.mark.parametrize(
-    "argv, module",
-    [
-        (["returnvia"], "breakneck.returnpath"),
-        (["pourstitch", "--nets", "GND"], "breakneck.pourstitch"),
-    ],
-)
-def test_command_without_the_place_extra_exits_with_the_install_hint(
-    monkeypatch, argv, module
-):
-    # A None entry makes the import raise ModuleNotFoundError; the package
-    # attribute would otherwise satisfy `from breakneck import ...`.
-    monkeypatch.setitem(sys.modules, module, None)
-    monkeypatch.delattr(breakneck, module.rpartition(".")[2], raising=False)
-    monkeypatch.setattr(cli, "run_placement", lambda *a: pytest.fail("ran"))
-    lines: list[str] = []
-    sink = logger.add(lambda m: lines.append(str(m)), format="{message}")
-    args = parsed(monkeypatch, argv)
-
-    try:
-        with pytest.raises(SystemExit) as exit_info:
-            getattr(cli, f"execute_{argv[0]}")(args)
-    finally:
-        logger.remove(sink)
-
-    assert exit_info.value.code == 1
-    assert any("uv tool install 'breakneck[place]'" in line for line in lines)
-
-
 @pytest.fixture
 def restore_default_sink():
     yield
@@ -336,3 +307,16 @@ def test_main_logs_info_by_default(monkeypatch, capsys):
     logger.debug("per-via detail")
 
     assert "per-via detail" not in capsys.readouterr().err
+
+
+def test_importing_the_cli_leaves_scipy_skimage_and_matplotlib_unloaded():
+    # A subprocess, because this test session has already imported them.
+    code = (
+        "import sys, breakneck.cli; "
+        "print([m for m in ('scipy', 'skimage', 'matplotlib') if m in sys.modules])"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+
+    assert result.stdout.strip() == "[]"
