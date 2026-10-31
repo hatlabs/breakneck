@@ -14,7 +14,7 @@ A signal changing layers through a via also changes its reference plane, and its
 
 | Before: `breakneck returnvia --check --overlay` | After: `breakneck returnvia --overlay` |
 |---|---|
-| ![Return distance heatmap on F.Cu before placing return vias, with many rings around unserved vias](docs/images/returnvia-before.png) | ![Return distance heatmap on F.Cu after placing return vias, with some rings left](docs/images/returnvia-after.png) |
+| ![Return distance heatmap on F.Cu before placing return vias, with many rings around unserved vias](https://raw.githubusercontent.com/hatlabs/breakneck/main/docs/images/returnvia-before.png) | ![Return distance heatmap on F.Cu after placing return vias, with some rings left](https://raw.githubusercontent.com/hatlabs/breakneck/main/docs/images/returnvia-after.png) |
 
 The return distance heatmap on F.Cu of a four-layer board, before and after placing return vias, following a `pourstitch --power` run. Each pink ring marks an unserved via end: one with no ground return within 1.5 mm through its reference plane. The rings left after the run mark the vias the planner couldn't serve; fix those by hand.
 
@@ -49,7 +49,7 @@ Power pours are stitched sparsely. They need vias to join their layers, to carry
 
 | Before: `breakneck pourstitch --power --check --overlay` | After: `breakneck pourstitch --power --overlay` |
 |---|---|
-| ![Power pour coverage on F.Cu before stitching, with pink areas beyond 10 mm](docs/images/power-before.png) | ![Power pour coverage on F.Cu after placing stitching vias](docs/images/power-after.png) |
+| ![Power pour coverage on F.Cu before stitching, with pink areas beyond 10 mm](https://raw.githubusercontent.com/hatlabs/breakneck/main/docs/images/power-before.png) | ![Power pour coverage on F.Cu after placing stitching vias](https://raw.githubusercontent.com/hatlabs/breakneck/main/docs/images/power-after.png) |
 
 Power pour coverage on F.Cu. Pink copper is more than 10 mm from a stitching via, measured through the copper.
 
@@ -57,7 +57,7 @@ Ground pours are stitched densely, so that the ground layers act as one referenc
 
 | Before: `breakneck pourstitch --check --overlay` | After: `breakneck pourstitch --overlay` |
 |---|---|
-| ![Ground plane coverage on In1.Cu before stitching, with pink gaps between vias](docs/images/ground-before.png) | ![Ground plane coverage on In1.Cu after placing stitching vias](docs/images/ground-after.png) |
+| ![Ground plane coverage on In1.Cu before stitching, with pink gaps between vias](https://raw.githubusercontent.com/hatlabs/breakneck/main/docs/images/ground-before.png) | ![Ground plane coverage on In1.Cu after placing stitching vias](https://raw.githubusercontent.com/hatlabs/breakneck/main/docs/images/ground-after.png) |
 
 Ground plane coverage on In1.Cu, following the `pourstitch --power` and `returnvia` runs above. Pink copper is more than 3 mm from a stitching via.
 
