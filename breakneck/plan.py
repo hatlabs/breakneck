@@ -32,7 +32,7 @@ def pad_clearance(override: float | None) -> float:
     return max(OTHER_NET_CLEARANCE, override + OVERRIDE_MARGIN)
 
 
-# pourstitch defaults live here so the CLI can show them without the place extra.
+# pourstitch defaults live here so the CLI can show them without importing scipy.
 # A 3 mm ground lattice (4.2 mm pitch) is λ/20 at about 1.7 GHz in FR-4.
 POURSTITCH_GROUND_DISTANCE = 3.0
 # Power pours need vias for connectivity, current and extremities only.

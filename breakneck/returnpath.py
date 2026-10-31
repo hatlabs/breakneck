@@ -3,7 +3,7 @@
 On a plane, the distance from a signal via to a return is the shortest path
 from the via's centre to the return's centre through the plane's ground fill,
 plus each return's passable disc and a straight hop across the via's own
-void. This module needs the `place` extra.
+void.
 """
 
 from __future__ import annotations

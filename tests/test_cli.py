@@ -4,7 +4,6 @@ import sys
 import pytest
 from loguru import logger
 
-import breakneck
 from breakneck import cli, overlay, placement, pourstitch_command, returnvia_command
 from breakneck.cli import parse_via_size
 from breakneck.plan import (
@@ -264,35 +263,6 @@ def test_pourstitch_placement_failure_exits_cleanly(monkeypatch, error):
     assert exit_info.value.code == 1
     assert exit_info.value.__cause__ is None
     assert exit_info.value.__suppress_context__
-
-
-@pytest.mark.parametrize(
-    "argv, module",
-    [
-        (["returnvia"], "breakneck.returnpath"),
-        (["pourstitch", "--nets", "GND"], "breakneck.pourstitch"),
-    ],
-)
-def test_command_without_the_place_extra_exits_with_the_install_hint(
-    monkeypatch, argv, module
-):
-    # A None entry makes the import raise ModuleNotFoundError; the package
-    # attribute would otherwise satisfy `from breakneck import ...`.
-    monkeypatch.setitem(sys.modules, module, None)
-    monkeypatch.delattr(breakneck, module.rpartition(".")[2], raising=False)
-    monkeypatch.setattr(cli, "run_placement", lambda *a: pytest.fail("ran"))
-    lines: list[str] = []
-    sink = logger.add(lambda m: lines.append(str(m)), format="{message}")
-    args = parsed(monkeypatch, argv)
-
-    try:
-        with pytest.raises(SystemExit) as exit_info:
-            getattr(cli, f"execute_{argv[0]}")(args)
-    finally:
-        logger.remove(sink)
-
-    assert exit_info.value.code == 1
-    assert any("uv tool install 'breakneck[place]'" in line for line in lines)
 
 
 @pytest.fixture

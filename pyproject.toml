@@ -19,13 +19,13 @@ keywords = ["KiCad", "EDA", "PCB", "stitching", "neckdown", "breakneck"]
 dependencies = [
     "kicad-python >= 0.8.0",
     "loguru>=0.7.2",
+    "matplotlib>=3.10.0",
     "numpy>=2.0",
+    "scikit-image>=0.25",
+    "scipy>=1.14",
     "shapely>=2.0.7",
     "svgpathtools>=1.6.1",
 ]
-
-[project.optional-dependencies]
-place = ["matplotlib>=3.10.0", "scikit-image>=0.25", "scipy>=1.14"]
 
 [project.urls]
 Homepage = "https://github.com/hatlabs/breakneck"
@@ -37,8 +37,6 @@ breakneck = "breakneck.cli:main"
 dev = [
     "ipykernel>=6.29.5",
     "pytest>=8.3.4",
-    # The pourstitch and render tests import the place extra at collection.
-    "breakneck[place]",
     "pytest-xdist>=3.8.0",
 ]
 

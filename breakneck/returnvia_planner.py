@@ -1,8 +1,7 @@
 """The `returnvia` planner: return vias placed by the through-plane distance.
 
 Every candidate spot is measured with the check's own code
-(`ReturnFields.distance_from`), so a planned run passes its own check. This
-module needs the `place` extra.
+(`ReturnFields.distance_from`), so a planned run passes its own check.
 """
 
 from __future__ import annotations

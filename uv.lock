@@ -40,22 +40,17 @@ source = { editable = "." }
 dependencies = [
     { name = "kicad-python" },
     { name = "loguru" },
+    { name = "matplotlib" },
     { name = "numpy" },
+    { name = "scikit-image" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "shapely" },
     { name = "svgpathtools" },
 ]
 
-[package.optional-dependencies]
-place = [
-    { name = "matplotlib" },
-    { name = "scikit-image" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-]
-
 [package.dev-dependencies]
 dev = [
-    { name = "breakneck", extra = ["place"] },
     { name = "ipykernel" },
     { name = "pytest" },
     { name = "pytest-xdist" },
@@ -65,18 +60,16 @@ dev = [
 requires-dist = [
     { name = "kicad-python", specifier = ">=0.8.0" },
     { name = "loguru", specifier = ">=0.7.2" },
-    { name = "matplotlib", marker = "extra == 'place'", specifier = ">=3.10.0" },
+    { name = "matplotlib", specifier = ">=3.10.0" },
     { name = "numpy", specifier = ">=2.0" },
-    { name = "scikit-image", marker = "extra == 'place'", specifier = ">=0.25" },
-    { name = "scipy", marker = "extra == 'place'", specifier = ">=1.14" },
+    { name = "scikit-image", specifier = ">=0.25" },
+    { name = "scipy", specifier = ">=1.14" },
     { name = "shapely", specifier = ">=2.0.7" },
     { name = "svgpathtools", specifier = ">=1.6.1" },
 ]
-provides-extras = ["place"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "breakneck", extras = ["place"] },
     { name = "ipykernel", specifier = ">=6.29.5" },
     { name = "pytest", specifier = ">=8.3.4" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
