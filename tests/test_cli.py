@@ -1,4 +1,5 @@
 import argparse
+import subprocess
 import sys
 
 import pytest
@@ -306,3 +307,16 @@ def test_main_logs_info_by_default(monkeypatch, capsys):
     logger.debug("per-via detail")
 
     assert "per-via detail" not in capsys.readouterr().err
+
+
+def test_importing_the_cli_leaves_scipy_skimage_and_matplotlib_unloaded():
+    # A subprocess, because this test session has already imported them.
+    code = (
+        "import sys, breakneck.cli; "
+        "print([m for m in ('scipy', 'skimage', 'matplotlib') if m in sys.modules])"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+
+    assert result.stdout.strip() == "[]"
