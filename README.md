@@ -59,7 +59,7 @@ Ground pours are stitched densely, so that the ground layers act as one referenc
 |---|---|
 | ![Ground plane coverage on In1.Cu before stitching, with pink gaps between vias](https://raw.githubusercontent.com/hatlabs/breakneck/main/docs/images/ground-before.png) | ![Ground plane coverage on In1.Cu after placing stitching vias](https://raw.githubusercontent.com/hatlabs/breakneck/main/docs/images/ground-after.png) |
 
-Ground plane coverage on In1.Cu, following the `pourstitch --power` and `returnvia` runs above. Pink copper is more than 3 mm from a stitching via.
+Ground plane coverage on In1.Cu, following the `pourstitch --power` and `returnvia` runs above. Pink copper is more than 3 mm from a stitching via. The pink left after the run, here next to the through-hole pads, is copper where no via fits within 3 mm through the copper; the run logs its total area but doesn't mark it.
 
 `pourstitch` rasterises the pours at 0.1 mm, places vias on a square lattice of pitch D·√2, then fills the remaining gaps one at a time, starting with the point farthest from any via. Narrow spots get a smaller fallback via. `--render` and `--overlay` show the result as heatmaps (see below).
 
