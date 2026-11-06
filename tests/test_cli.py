@@ -43,11 +43,14 @@ def test_placement_commands_take_allow_splits(monkeypatch, argv):
     assert cli.parse_args().allow_splits
 
 
-def test_refused_split_exits_with_an_error(monkeypatch):
-    def refuse(planner, options, settings):
-        raise placement.SplitError("split")
+@pytest.mark.parametrize(
+    "error", [NoBoardOutlineError("no outline"), placement.SplitError("split")]
+)
+def test_padvia_failure_exits_cleanly(monkeypatch, error):
+    def fail(planner, options, settings):
+        raise error
 
-    monkeypatch.setattr(cli, "run_placement", refuse)
+    monkeypatch.setattr(cli, "run_placement", fail)
     args = argparse.Namespace(
         nets=["GND"], via=None, dry_run=False, kicad_cli=None, allow_splits=False
     )
@@ -250,6 +253,7 @@ def test_pourstitch_takes_ground_nets(monkeypatch):
         placement.BoardChangedError("changed"),
         NoGroundNetsError("no ground"),
         OtherClassNetsError("other class"),
+        NoBoardOutlineError("no outline"),
     ],
 )
 def test_pourstitch_placement_failure_exits_cleanly(monkeypatch, error):
