@@ -36,7 +36,7 @@ from breakneck.returnvia import (
     resolve_ground_nets,
     via_references,
 )
-from breakneck.snapshot import PadKind, Point2, Snapshot
+from breakneck.snapshot import NoBoardOutlineError, PadKind, Point2, Snapshot
 
 # The void floods through edge-sharing pixels only, so it never leaks through
 # two fill pixels that meet at a corner.
@@ -52,10 +52,6 @@ Entries = tuple[npt.NDArray[np.intp], npt.NDArray[np.intp], FloatMap]
 def served_within(distance: float) -> float:
     """The largest return distance that serves a via end."""
     return distance + QUANTISATION
-
-
-class NoBoardOutlineError(ValueError):
-    pass
 
 
 class Outcome(Enum):
@@ -98,7 +94,7 @@ class ReturnFields:
 
     def __init__(self, snapshot: Snapshot) -> None:
         if snapshot.board_outline.is_empty:
-            raise NoBoardOutlineError("Board has no closed Edge.Cuts outline")
+            raise NoBoardOutlineError()
         self.snapshot = snapshot
         self.grid = Grid.covering(snapshot.board_outline.bounds)
         self._fills: dict[ReferencePlane, BoolMap] = {}

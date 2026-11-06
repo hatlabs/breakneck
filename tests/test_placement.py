@@ -1,10 +1,12 @@
 from datetime import datetime
+from itertools import pairwise
 
 import kipy.board_types
 import pytest
 from kipy.board import BoardLayer as BL
-from kipy.board_types import unwrap
+from kipy.board_types import BoardSegment, unwrap
 from kipy.errors import ApiError, ConnectionError
+from kipy.geometry import Vector2
 from kipy.proto.common.commands.editor_commands_pb2 import (
     CreateItemsResponse,
     ItemStatusCode,
@@ -16,6 +18,7 @@ from loguru import logger
 from breakneck import commit, drc, placement
 from breakneck.commit import Marker, MarkerKind
 from breakneck.plan import Plan, PlannedUnit, Stub, UnfixableSpot
+from breakneck.returnpath import NoBoardOutlineError
 from breakneck.snapshot import NM_PER_MM, Snapshot, ViaSize
 
 VIA = ViaSize(0.6, 0.3)
@@ -26,6 +29,21 @@ BOARD_CHANGES = {
     "push_commit",
     "remove_items",
 }
+
+
+SQUARE = [(0, 0), (20, 0), (20, 20), (0, 20), (0, 0)]
+
+
+def edge_cuts(corners):
+    """Edge.Cuts segments joining `corners` in order."""
+    segments = []
+    for a, b in pairwise(corners):
+        seg = BoardSegment()
+        seg.layer = BL.BL_Edge_Cuts
+        seg.start = Vector2.from_xy(round(a[0] * NM_PER_MM), round(a[1] * NM_PER_MM))
+        seg.end = Vector2.from_xy(round(b[0] * NM_PER_MM), round(b[1] * NM_PER_MM))
+        segments.append(seg)
+    return segments
 
 
 def net(name):
@@ -69,6 +87,7 @@ class RecordingBoard:
         self.client = FakeClient(self)
         # Successive get_as_string results; the last one repeats.
         self.texts = ["(kicad_pcb)"]
+        self.edges = edge_cuts(SQUARE)
         self.shapes = []
         self.removed = []
 
@@ -85,7 +104,7 @@ class RecordingBoard:
         return self.texts.pop(0) if len(self.texts) > 1 else self.texts[0]
 
     def get_shapes(self):
-        return list(self.shapes)
+        return [*self.edges, *self.shapes]
 
     def remove_items(self, items):
         self.calls.append("remove_items")
@@ -152,6 +171,37 @@ def test_missing_kicad_cli_fails_before_any_board_change(monkeypatch):
     board = RecordingBoard()
 
     with pytest.raises(drc.KiCadCliNotFound):
+        placement.run_placement(
+            never_plan, None, placement.RunSettings("test"), FakeKiCad(board)
+        )
+
+    assert board_changes(board) == []
+
+
+def test_open_board_outline_fails_before_any_board_change(monkeypatch):
+    monkeypatch.setattr(drc.shutil, "which", lambda name: None)
+    monkeypatch.setattr(drc, "KNOWN_KICAD_CLI_PATHS", ())
+    board = RecordingBoard()
+    board.edges = edge_cuts(SQUARE[:-1])
+
+    with pytest.raises(NoBoardOutlineError):
+        placement.run_placement(
+            never_plan, None, placement.RunSettings("test"), FakeKiCad(board)
+        )
+
+    assert board_changes(board) == []
+
+
+def test_open_outline_around_a_closed_cutout_fails_before_any_board_change(
+    monkeypatch,
+):
+    monkeypatch.setattr(drc.shutil, "which", lambda name: None)
+    monkeypatch.setattr(drc, "KNOWN_KICAD_CLI_PATHS", ())
+    board = RecordingBoard()
+    cutout = [(8, 8), (12, 8), (12, 12), (8, 12), (8, 8)]
+    board.edges = [*edge_cuts(SQUARE[:-1]), *edge_cuts(cutout)]
+
+    with pytest.raises(NoBoardOutlineError):
         placement.run_placement(
             never_plan, None, placement.RunSettings("test"), FakeKiCad(board)
         )

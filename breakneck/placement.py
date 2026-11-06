@@ -22,7 +22,12 @@ from breakneck.commit import (
     refill_tolerant,
 )
 from breakneck.plan import Plan, Planner
-from breakneck.snapshot import Snapshot
+from breakneck.snapshot import (
+    NoBoardOutlineError,
+    Snapshot,
+    edge_paths_closed,
+    read_edge_paths,
+)
 
 OptionsT = TypeVar("OptionsT")
 
@@ -112,6 +117,12 @@ def log_summary(
         logger.warning(f"  unattributed: {v}")
 
 
+def check_outline(board: kipy.board.Board) -> None:
+    """Fail before any board change on a board without an outline."""
+    if not edge_paths_closed(read_edge_paths(board.get_shapes())):
+        raise NoBoardOutlineError()
+
+
 def run_placement(
     planner: Planner[OptionsT],
     options: OptionsT,
@@ -120,12 +131,13 @@ def run_placement(
 ) -> RunResult:
     """Run a planner against the open board.
 
-    kicad-cli and the project files are checked before anything touches the
-    board. Zones are refilled before the snapshot even in a dry run, because
-    stale fills would drive the placement.
+    The board outline, kicad-cli and the project files are checked before
+    anything touches the board. Zones are refilled before the snapshot even in
+    a dry run, because stale fills would drive the placement.
     """
     kicad = kicad or kipy.KiCad()
     board = kicad.get_board()
+    check_outline(board)
 
     kicad_cli = drc.locate_kicad_cli(settings.kicad_cli, kicad)
     logger.info(f"Using {kicad_cli} ({drc.kicad_cli_version(kicad_cli)})")

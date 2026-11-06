@@ -7,7 +7,6 @@ import dataclasses
 from collections.abc import Callable, Mapping, Sequence
 
 import kipy
-import kipy.board
 import matplotlib.colors
 import numpy as np
 from loguru import logger
@@ -17,11 +16,15 @@ from shapely.ops import unary_union
 
 from breakneck import overlay, render
 from breakneck.commit import Marker, MarkerKind
-from breakneck.placement import RunSettings, measure_only, run_placement
+from breakneck.placement import (
+    RunSettings,
+    check_outline,
+    measure_only,
+    run_placement,
+)
 from breakneck.plan import QUANTISATION, PlannedUnit
 from breakneck.raster import BoolMap, CoverageMap, Grid
 from breakneck.returnpath import (
-    NoBoardOutlineError,
     Outcome,
     PlaneReturn,
     ReturnFields,
@@ -34,13 +37,7 @@ from breakneck.returnvia import (
     via_references,
 )
 from breakneck.returnvia_planner import ReturnViaPlanner
-from breakneck.snapshot import (
-    PadKind,
-    Snapshot,
-    Via,
-    outline_from_edge_paths,
-    read_edge_paths,
-)
+from breakneck.snapshot import PadKind, Snapshot, Via
 
 COMMAND = "returnvia"
 OVERLAY_COMMIT = "breakneck returnvia overlay"
@@ -92,12 +89,6 @@ STYLE = render.HeatmapStyle(
     margin=QUANTISATION,
     ring_colour=RING_COLOUR,
 )
-
-
-def check_outline(board: kipy.board.Board) -> None:
-    """Fail before any board change on a board without an outline."""
-    if outline_from_edge_paths(read_edge_paths(board.get_shapes())).is_empty:
-        raise NoBoardOutlineError("Board has no closed Edge.Cuts outline")
 
 
 def with_returns(snapshot: Snapshot, units: Sequence[PlannedUnit]) -> Snapshot:
