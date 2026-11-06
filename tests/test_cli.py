@@ -106,7 +106,7 @@ def test_heatmap_command_allow_splits_reaches_the_run_settings(
         "KiCad",
         lambda: type("K", (), {"get_board": lambda self: None})(),
     )
-    monkeypatch.setattr(returnvia_command, "check_outline", lambda board: None)
+    monkeypatch.setattr(module, "check_outline", lambda board: None)
     flag = ["--allow-splits"] if allow else []
 
     with pytest.raises(Captured):

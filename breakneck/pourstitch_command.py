@@ -9,7 +9,7 @@ import kipy.board
 from loguru import logger
 
 from breakneck import overlay, render
-from breakneck.placement import RunSettings, measure_only, run_placement
+from breakneck.placement import RunSettings, check_outline, measure_only, run_placement
 from breakneck.plan import Plan
 from breakneck.pourstitch import Options, PourStitcher, summarise
 from breakneck.raster import CoverageMap, Grid
@@ -95,6 +95,7 @@ def execute(
     """
     kicad = kicad or kipy.KiCad()
     board = kicad.get_board()
+    check_outline(board)
     place_overlay = outputs.overlay and overlay.overlay_ready(board, outputs, dry_run)
 
     stitcher = PourStitcher()
