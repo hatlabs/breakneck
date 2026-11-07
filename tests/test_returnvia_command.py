@@ -1193,7 +1193,7 @@ def eco2_created(fakes) -> list:
     return [i.proto for i in fakes.created if i.layer == MARKER_LAYER]
 
 
-def test_check_overlay_replaces_markers_with_an_x_per_unserved_end(fakes):
+def test_check_overlay_replaces_markers_with_a_circle_per_unserved_end(fakes):
     # In1's slot leaves the F.Cu end unserved; the B.Cu end is served.
     fakes.snap = slotted((SIG[0] + 1.4, SIG[1]))
     stale = old_marker()
@@ -1259,7 +1259,7 @@ def test_placing_run_overlay_leaves_the_markers_to_the_placement(fakes):
     assert eco2_created(fakes) == []
 
 
-def test_unserved_markers_put_one_x_at_each_via_with_an_unserved_end():
+def test_unserved_markers_put_one_circle_at_each_via_with_an_unserved_end():
     def end(position, layer, served):
         plane = ReferencePlane("In1.Cu" if layer == "F.Cu" else "In2.Cu", "GND")
         return PlaneReturn(

@@ -33,6 +33,8 @@ from breakneck.snapshot import NM_PER_MM, Point2
 
 MARKER_LAYER = BoardLayer.BL_Eco2_User
 MARKER_HALF_SIZE = 0.5
+# 0.7 mm across at the least, so a small spot's circle stays visible.
+UNFIXABLE_MIN_RADIUS = 0.35
 # How far a marker reaches past the copper it marks.
 MARKER_MARGIN = 0.3
 MARKER_WIDTH = 0.1
@@ -51,17 +53,14 @@ class MarkerKind(enum.Enum):
 class Marker:
     position: Point2
     kind: MarkerKind
-    half_size: float = MARKER_HALF_SIZE
-
-
-def marker_half_size(extent: float) -> float:
-    """Half size of a marker whose every glyph end lies past `extent`."""
-    return max(MARKER_HALF_SIZE, extent + MARKER_MARGIN)
+    # How far the marked copper reaches from `position`; an unfixable
+    # marker's circle reaches MARKER_MARGIN past it.
+    extent: float = 0.0
 
 
 # Each kind gets its own glyph so the spots can be told apart on Eco2.
+# UNFIXABLE is a circle; these are unit-square line pairs.
 _GLYPHS: dict[MarkerKind, list[tuple[Point2, Point2]]] = {
-    MarkerKind.UNFIXABLE: [((-1, -1), (1, 1)), ((-1, 1), (1, -1))],
     MarkerKind.FORCED: [((-1, 0), (1, 0)), ((0, -1), (0, 1))],
     MarkerKind.UNATTRIBUTED: [
         ((-1, -1), (1, -1)),
@@ -94,6 +93,22 @@ def eco2_segment(start: Point2, end: Point2) -> kipy.board_types.BoardSegment:
     return seg
 
 
+def eco2_circle(centre: Point2, radius: float) -> kipy.board_types.BoardCircle:
+    shape = base_types_pb2.GraphicShape(
+        circle=base_types_pb2.GraphicCircleAttributes(
+            center=_vec(centre).proto,
+            radius_point=_vec((centre[0] + radius, centre[1])).proto,
+        )
+    )
+    shape.attributes.fill.fill_type = base_types_pb2.GFT_UNFILLED
+    circle = kipy.board_types.BoardCircle(
+        proto=board_types_pb2.BoardGraphicShape(shape=shape)
+    )
+    circle.layer = MARKER_LAYER
+    circle.attributes.stroke.width = _nm(MARKER_WIDTH)
+    return circle
+
+
 def marker_shapes(
     shapes: Iterable[kipy.board_types.BoardShape],
 ) -> list[kipy.board_types.BoardShape]:
@@ -101,11 +116,15 @@ def marker_shapes(
     return [s for s in shapes if s.layer == MARKER_LAYER]
 
 
-def marker_items(markers: Sequence[Marker]) -> list[kipy.board_types.BoardSegment]:
-    out = []
+def marker_items(markers: Sequence[Marker]) -> list[kipy.board_types.BoardShape]:
+    out: list[kipy.board_types.BoardShape] = []
     for m in markers:
+        if m.kind is MarkerKind.UNFIXABLE:
+            radius = max(UNFIXABLE_MIN_RADIUS, m.extent + MARKER_MARGIN)
+            out.append(eco2_circle(m.position, radius))
+            continue
         x, y = m.position
-        h = m.half_size
+        h = MARKER_HALF_SIZE
         for (ax, ay), (bx, by) in _GLYPHS[m.kind]:
             out.append(eco2_segment((x + ax * h, y + ay * h), (x + bx * h, y + by * h)))
     return out

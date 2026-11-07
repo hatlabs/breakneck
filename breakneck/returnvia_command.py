@@ -296,7 +296,7 @@ def markers(
 
 
 def unserved_markers(results: Sequence[PlaneReturn]) -> tuple[Marker, ...]:
-    """An X at each via with an unserved end, where the heatmaps ring it,
+    """A circle at each via with an unserved end, where the heatmaps ring it,
     sized as a placing run's unfixable markers."""
     positions = dict.fromkeys(r.position for r in results if not r.served)
     return tuple(Marker(p, MarkerKind.UNFIXABLE) for p in positions)
@@ -361,7 +361,7 @@ def execute(
     """Run returnvia against the open board.
 
     `check` only measures the existing returns: no planning, no kicad-cli,
-    no vias. With overlays, it replaces the markers with an X at each
+    no vias. With overlays, it replaces the markers with a circle at each
     unserved via in the overlay commit. Planned vias count as returns in
     the measurement, except forced ones. The heatmaps show only the copper
     around unserved via ends, or with `full_map` all copper. Overlays are

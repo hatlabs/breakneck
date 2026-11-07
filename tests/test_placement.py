@@ -7,6 +7,7 @@ from kipy.board import BoardLayer as BL
 from kipy.board_types import BoardSegment, unwrap
 from kipy.errors import ApiError, ConnectionError
 from kipy.geometry import Vector2
+from kipy.proto.common import base_types_pb2
 from kipy.proto.common.commands.editor_commands_pb2 import (
     CreateItemsResponse,
     ItemStatusCode,
@@ -684,16 +685,28 @@ def test_commit_label_carries_command_and_timestamp():
 
 @pytest.mark.parametrize(
     "kind, segments",
-    [(MarkerKind.UNFIXABLE, 2), (MarkerKind.FORCED, 2), (MarkerKind.UNATTRIBUTED, 4)],
+    [(MarkerKind.FORCED, 2), (MarkerKind.UNATTRIBUTED, 4)],
 )
 def test_marker_glyphs_are_centred_on_the_spot(kind, segments):
     items = commit.marker_items([Marker((10, 20), kind)])
 
     assert len(items) == segments
+    assert all(isinstance(s, kipy.board_types.BoardSegment) for s in items)
     xs = [p.x for s in items for p in (s.start, s.end)]
     ys = [p.y for s in items for p in (s.start, s.end)]
     assert (min(xs) + max(xs)) / 2 == 10_000_000
     assert (min(ys) + max(ys)) / 2 == 20_000_000
+    assert max(xs) - min(xs) == 2 * commit.MARKER_HALF_SIZE * NM_PER_MM
+
+
+def test_unfixable_marker_is_an_unfilled_circle_on_the_spot():
+    (item,) = commit.marker_items([Marker((10, 20), MarkerKind.UNFIXABLE)])
+
+    assert isinstance(item, kipy.board_types.BoardCircle)
+    assert item.layer == commit.MARKER_LAYER
+    assert (item.center.x, item.center.y) == (10_000_000, 20_000_000)
+    assert item.attributes.stroke.width == commit.MARKER_WIDTH * NM_PER_MM
+    assert item.proto.shape.attributes.fill.fill_type == base_types_pb2.GFT_UNFILLED
 
 
 def test_markers_for_unfixable_forced_and_unattributed():
@@ -942,20 +955,36 @@ def test_measure_only_refills_and_snapshots_with_an_empty_plan(
     assert all(m.startswith("WARNING") for m in stale)
 
 
-def test_unfixable_marker_reaches_past_the_spot_extent():
-    extent = 2.0
+@pytest.mark.parametrize("extent", [0.5, 2.0])
+def test_unfixable_circle_encloses_the_spot_extent(extent):
     spot = UnfixableSpot((10, 20), "GND", "x", layer="F.Cu", extent=extent)
     result = drc.PruneResult(Plan(unfixable=(spot,)), (), (), (), 1)
 
-    items = commit.marker_items(placement.markers_for(result))
+    (item,) = commit.marker_items(placement.markers_for(result))
 
-    # The X's arms end at the half size along each axis.
-    half = min(abs(p.x / NM_PER_MM - 10) for s in items for p in (s.start, s.end))
-    assert half >= extent + commit.MARKER_MARGIN - 1e-6
+    assert item.radius() / NM_PER_MM == pytest.approx(extent + commit.MARKER_MARGIN)
 
 
-def test_markers_without_extent_keep_the_default_size():
-    items = commit.marker_items([Marker((10, 20), MarkerKind.UNFIXABLE)])
+def test_unfixable_circle_of_a_small_spot_keeps_the_minimum_diameter():
+    spot = UnfixableSpot((10, 20), "GND", "x", layer="F.Cu", extent=0.01)
+    result = drc.PruneResult(Plan(unfixable=(spot,)), (), (), (), 1)
 
-    xs = [p.x for s in items for p in (s.start, s.end)]
-    assert max(xs) - min(xs) == 2 * commit.MARKER_HALF_SIZE * NM_PER_MM
+    (item,) = commit.marker_items(placement.markers_for(result))
+
+    assert 2 * item.radius() / NM_PER_MM == pytest.approx(0.7)
+
+
+def test_unfixable_circle_without_extent_is_0_7_mm_across():
+    (item,) = commit.marker_items([Marker((10, 20), MarkerKind.UNFIXABLE)])
+
+    assert 2 * item.radius() / NM_PER_MM == pytest.approx(0.7)
+
+
+def test_run_removes_earlier_circle_markers(saved_board):
+    board, kicad = saved_board
+    (stale,) = commit.marker_items([Marker((7, 7), MarkerKind.UNFIXABLE)])
+    board.shapes = [stale]
+
+    placement.run_placement(plan_at((1, 1)), None, placement.RunSettings("t"), kicad)
+
+    assert board.removed == [stale]
