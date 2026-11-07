@@ -295,11 +295,16 @@ def markers(
     }
 
 
-def unserved_markers(results: Sequence[PlaneReturn]) -> tuple[Marker, ...]:
+def unserved_markers(
+    results: Sequence[PlaneReturn], vias: Sequence[Via]
+) -> tuple[Marker, ...]:
     """A circle at each via with an unserved end, where the heatmaps ring it,
-    sized as a placing run's unfixable markers."""
+    sized as a placing run's unfixable markers so the via can't hide it."""
+    radii = {v.position: v.diameter / 2 for v in vias}
     positions = dict.fromkeys(r.position for r in results if not r.served)
-    return tuple(Marker(p, MarkerKind.UNFIXABLE) for p in positions)
+    return tuple(
+        Marker(p, MarkerKind.UNFIXABLE, extent=radii.get(p, 0.0)) for p in positions
+    )
 
 
 def ring_maps(
@@ -441,5 +446,5 @@ def execute(
             outputs,
             place_overlay,
             OVERLAY_COMMIT,
-            unserved_markers(results) if check else None,
+            unserved_markers(results, snapshot.vias) if check else None,
         )

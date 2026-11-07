@@ -128,7 +128,14 @@ class _Context:
                     by_ground.setdefault(r.plane.ground, []).append(r.plane)
                 else:
                     assert r.reason is not None
-                    unfixable.append(UnfixableSpot(r.position, r.net, r.reason))
+                    unfixable.append(
+                        UnfixableSpot(
+                            r.position,
+                            r.net,
+                            r.reason,
+                            extent=refs.via.diameter / 2,
+                        )
+                    )
             targets += [Target(refs.via, g, tuple(p)) for g, p in by_ground.items()]
         return cls(
             snapshot,
@@ -180,7 +187,15 @@ class _Round:
                     continue
                 reason = NO_ROOM if spot is None else WOULD_OVERLAP
             where = ", ".join(p.layer for p in planes)
-            unfixable.append(UnfixableSpot(t.via.position, t.via.net, reason, where))
+            unfixable.append(
+                UnfixableSpot(
+                    t.via.position,
+                    t.via.net,
+                    reason,
+                    where,
+                    extent=t.via.diameter / 2,
+                )
+            )
 
         return Plan(units=tuple(self.units), unfixable=tuple(unfixable))
 

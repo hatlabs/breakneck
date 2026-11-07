@@ -1208,7 +1208,8 @@ def test_check_overlay_replaces_markers_with_a_circle_per_unserved_end(fakes):
         ("push_commit", returnvia_command.OVERLAY_COMMIT),
     ]
     assert stale in board.removed
-    expected = marker_items([Marker(SIG, MarkerKind.UNFIXABLE)])
+    radius = next(v.diameter / 2 for v in fakes.snap.vias if v.position == SIG)
+    expected = marker_items([Marker(SIG, MarkerKind.UNFIXABLE, extent=radius)])
     assert eco2_created(fakes) == [i.proto for i in expected]
 
 
@@ -1276,7 +1277,14 @@ def test_unserved_markers_put_one_circle_at_each_via_with_an_unserved_end():
         end(served, "B.Cu", True),
     ]
 
-    assert returnvia_command.unserved_markers(results) == (
-        Marker(both_unserved, MarkerKind.UNFIXABLE),
-        Marker(one_unserved, MarkerKind.UNFIXABLE),
+    vias = [
+        Via(f"v{i}", "SIG", p, diameter, 0.3)
+        for i, (p, diameter) in enumerate(
+            [(both_unserved, 0.8), (one_unserved, 0.6), (served, 0.6)]
+        )
+    ]
+
+    assert returnvia_command.unserved_markers(results, vias) == (
+        Marker(both_unserved, MarkerKind.UNFIXABLE, extent=0.4),
+        Marker(one_unserved, MarkerKind.UNFIXABLE, extent=0.3),
     )

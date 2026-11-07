@@ -116,7 +116,7 @@ def test_spot_across_a_slot_is_rejected_even_with_clearance():
     result = plan(snap)
 
     assert not result.units
-    assert [s.position for s in result.unfixable] == [SIG]
+    assert [(s.position, s.extent) for s in result.unfixable] == [(SIG, VIA_RADIUS)]
 
 
 def test_ends_failing_on_two_ground_nets_get_one_via_each():
@@ -233,8 +233,8 @@ def test_no_ground_fill_end_is_unfixable_and_never_planned():
 
     (u,) = result.units
     assert not u.forced
-    assert [(s.position, s.reason) for s in result.unfixable] == [
-        (SIG, "no GND fill at the via on In1.Cu")
+    assert [(s.position, s.reason, s.extent) for s in result.unfixable] == [
+        (SIG, "no GND fill at the via on In1.Cu", VIA_RADIUS)
     ]
     after = {r.plane.layer: r for r in check(snap, result)}
     assert after["In1.Cu"].outcome is Outcome.NO_GROUND_FILL
