@@ -10,7 +10,8 @@ or pour on the pad's layer. Both distances run copper edge to copper edge on
 the pad's layer: the via's disk, the through-hole pad's copper there.
 For an unserved pad the planner scans `DIRECTIONS` rays from the pad centre,
 takes the first legal spot on each and keeps the one with the shortest stub,
-penalising rays that point back toward the footprint centre.
+penalising rays that point back toward the footprint centre. The stub runs in
+45° steps: a diagonal and a straight leg, diagonal first where it is clear.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from itertools import pairwise
 
 import shapely
 from loguru import logger
@@ -63,6 +65,31 @@ def _rounded(p: Point2) -> Point2:
     return (round(p[0], POSITION_DECIMALS), round(p[1], POSITION_DECIMALS))
 
 
+def _doglegs(start: Point2, via: Point2) -> list[tuple[Point2, ...]]:
+    """Paths from `start` to `via` with legs at multiples of 45°, preferred
+    first: diagonal-first, then straight-first, or the one segment when the
+    offset is itself at a multiple of 45°.
+
+    Both points sit on the position grid, so the bend does too and every leg
+    stays exactly at its angle once committed.
+    """
+    dx = round(via[0] - start[0], POSITION_DECIMALS)
+    dy = round(via[1] - start[1], POSITION_DECIMALS)
+    m = min(abs(dx), abs(dy))
+    if m == 0 or abs(dx) == abs(dy):
+        return [(start, via)]
+    sx, sy = math.copysign(m, dx), math.copysign(m, dy)
+    diagonal_first = _rounded((start[0] + sx, start[1] + sy))
+    straight_first = _rounded((via[0] - sx, via[1] - sy))
+    return [(start, diagonal_first, via), (start, straight_first, via)]
+
+
+def _detour(path: Sequence[Point2]) -> float:
+    """How much longer `path` runs than the straight line between its ends."""
+    legs = sum(math.dist(a, b) for a, b in pairwise(path))
+    return legs - math.dist(path[0], path[-1])
+
+
 def _via_ok(
     obstacles: Obstacles, pos: Point2, net: str, size: ViaSize, own_pad: Pad
 ) -> bool:
@@ -84,6 +111,25 @@ def _stub_ok(
     return not obstacles.clashes_with_other_nets(
         line, half, net, layer
     ) and not obstacles.clashes_with_unplated(line, half)
+
+
+def _clear_dogleg(
+    obstacles: Obstacles,
+    start: Point2,
+    via: Point2,
+    width: float,
+    net: str,
+    layer: str,
+) -> tuple[Point2, ...] | None:
+    """The preferred dogleg from `start` to `via` that keeps clear, if any."""
+    return next(
+        (
+            p
+            for p in _doglegs(start, via)
+            if _stub_ok(obstacles, LineString(p), width, net, layer)
+        ),
+        None,
+    )
 
 
 def _connected_region(obstacles: Obstacles, pad: Pad, layer: str) -> BaseGeometry:
@@ -209,37 +255,42 @@ def _plan_pad(
     layer = _own_layer(pad)
     shape = pad.shapes[layer]
     centre = shape.centroid
-    cx, cy = centre.x, centre.y
+    start = _rounded((centre.x, centre.y))
+    x0, y0 = start
     width = max(MIN_STUB_WIDTH, min(MAX_STUB_WIDTH, _minor_dimension(shape)))
     r = size.diameter / 2
-    best: tuple[float, Point2] | None = None
+    best: tuple[float, tuple[Point2, ...]] | None = None
     for k in range(DIRECTIONS):
         a = 2 * math.pi * k / DIRECTIONS
         dx, dy = math.cos(a), math.sin(a)
         t = 0.0
-        while Point(cx + dx * t, cy + dy * t).distance(shape) < r + OWN_PAD_GAP:
+        while Point(x0 + dx * t, y0 + dy * t).distance(shape) < r + OWN_PAD_GAP:
             t += CLEARING_STEP
         t0 = t
         while t <= t0 + MAX_STUB:
-            pos = _rounded((cx + dx * t, cy + dy * t))
-            stub = LineString([(cx, cy), pos])
-            if _via_ok(obstacles, pos, pad.net, size, pad) and _stub_ok(
-                obstacles, stub, width, pad.net, layer
-            ):
+            pos = _rounded((x0 + dx * t, y0 + dy * t))
+            path = (
+                _clear_dogleg(obstacles, start, pos, width, pad.net, layer)
+                if _via_ok(obstacles, pos, pad.net, size, pad)
+                else None
+            )
+            if path is not None:
                 alignment = dx * outward[0] + dy * outward[1] if outward else 0.0
-                score = (t - t0) + INWARD_PENALTY * (1 - alignment)
+                # The detour, not the length between the rounded ends, so
+                # sub-µm rounding can't break ties between straight stubs.
+                score = (t - t0) + _detour(path) + INWARD_PENALTY * (1 - alignment)
                 if best is None or score < best[0]:
-                    best = (score, pos)
+                    best = (score, path)
                 break
             t += SEARCH_STEP
     if best is None:
         return None
-    pos = best[1]
+    path = best[1]
     return PlannedUnit(
-        position=pos,
+        position=path[-1],
         net=pad.net,
         size=size,
-        stub=Stub(start=(cx, cy), end=pos, width=width, layer=layer),
+        stub=Stub(path=path, width=width, layer=layer),
     )
 
 

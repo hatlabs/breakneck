@@ -100,7 +100,7 @@ def unit(x, y, net="GND", stub=None, forced=False):
 
 @pytest.mark.parametrize("board", [BOARD_WITH_FONTS, BOARD_WITHOUT_FONTS])
 def test_injector_adds_vias_and_stubs_without_free(board):
-    stub = Stub(start=(10.0, 10.0), end=(11.0, 10.0), width=0.25, layer="F.Cu")
+    stub = Stub(path=((10.0, 10.0), (11.0, 10.0)), width=0.25, layer="F.Cu")
     units = [
         unit(11.0, 10.0, stub=stub),
         unit(20.123456, 30.5),
@@ -218,8 +218,25 @@ def test_violation_on_planned_via_is_attributed_by_position():
     assert result.unattributed == []
 
 
+def test_injector_writes_one_segment_per_stub_leg():
+    stub = Stub(path=((0, 0), (1, 1), (3, 1)), width=0.25, layer="F.Cu")
+
+    before = parse_sexpr(BOARD_WITHOUT_FONTS)
+    after = parse_sexpr(drc.inject(BOARD_WITHOUT_FONTS, [unit(3, 1, stub=stub)]))
+
+    segments = children(after, "segment")[len(children(before, "segment")) :]
+    assert [(field(s, "start"), field(s, "end")) for s in segments] == [
+        (["0", "0"], ["1", "1"]),
+        (["1", "1"], ["3", "1"]),
+    ]
+    for s in segments:
+        assert field(s, "width") == ["0.25"]
+        assert field(s, "layer") == ["F.Cu"]
+        assert field(s, "net") == ["GND"]
+
+
 def test_track_item_on_planned_stub_attributes_to_its_unit():
-    stub = Stub(start=(0, 0), end=(2, 0), width=0.3, layer="F.Cu")
+    stub = Stub(path=((0, 0), (2, 0)), width=0.3, layer="F.Cu")
     units = [unit(2, 0, stub=stub), unit(10, 10)]
     v = drc.parse_report(
         report(
@@ -238,13 +255,24 @@ def test_track_item_on_planned_stub_attributes_to_its_unit():
     assert set(result.dropped) == {0}
 
 
+def test_track_item_on_the_second_stub_leg_attributes_to_its_unit():
+    stub = Stub(path=((0, 0), (1, 1), (3, 1)), width=0.3, layer="F.Cu")
+    v = drc.parse_report(
+        report([violation("clearance", item("Track [GND] on F.Cu", 2.5, 1.1))])
+    )
+
+    result = drc.attribute(v, [unit(3, 1, stub=stub), unit(10, 10)])
+
+    assert set(result.dropped) == {0}
+
+
 RENAMED = {"F.Cu": "Top", "B.Cu": "Bottom"}
 
 
 @pytest.mark.parametrize("layer_name", ["Top", "F.Cu"])
 def test_track_item_on_a_renamed_layer_attributes_to_the_stub(layer_name):
     # KiCad describes items with the board's own layer names.
-    stub = Stub(start=(0, 0), end=(2, 0), width=0.3, layer="F.Cu")
+    stub = Stub(path=((0, 0), (2, 0)), width=0.3, layer="F.Cu")
     v = drc.parse_report(
         report([violation("clearance", item(f"Track [GND] on {layer_name}", 1, 0))])
     )
@@ -255,7 +283,7 @@ def test_track_item_on_a_renamed_layer_attributes_to_the_stub(layer_name):
 
 
 def test_track_item_on_another_renamed_layer_is_not_attributed():
-    stub = Stub(start=(0, 0), end=(2, 0), width=0.3, layer="F.Cu")
+    stub = Stub(path=((0, 0), (2, 0)), width=0.3, layer="F.Cu")
     v = drc.parse_report(
         report([violation("clearance", item("Track [GND] on Bottom", 1, 0))])
     )
@@ -266,7 +294,7 @@ def test_track_item_on_another_renamed_layer_is_not_attributed():
 
 
 def test_prune_matches_stubs_by_the_snapshot_layer_names():
-    stub = Stub(start=(0, 0), end=(2, 0), width=0.3, layer="F.Cu")
+    stub = Stub(path=((0, 0), (2, 0)), width=0.3, layer="F.Cu")
     snap = Snapshot(copper_layers=("F.Cu", "B.Cu"), layer_names=RENAMED)
 
     def planner(snapshot, options, forbidden):
@@ -289,7 +317,7 @@ def test_prune_matches_stubs_by_the_snapshot_layer_names():
 
 
 def test_track_item_on_another_layer_is_not_attributed_to_the_stub():
-    stub = Stub(start=(0, 0), end=(2, 0), width=0.3, layer="F.Cu")
+    stub = Stub(path=((0, 0), (2, 0)), width=0.3, layer="F.Cu")
     v = drc.parse_report(
         report([violation("clearance", item("Track [GND] on B.Cu", 0.0, 0.0))])
     )
@@ -300,7 +328,7 @@ def test_track_item_on_another_layer_is_not_attributed_to_the_stub():
 
 
 def test_track_item_off_the_stub_is_not_attributed():
-    stub = Stub(start=(0, 0), end=(2, 0), width=0.3, layer="F.Cu")
+    stub = Stub(path=((0, 0), (2, 0)), width=0.3, layer="F.Cu")
     v = drc.parse_report(
         report([violation("clearance", item("Track [GND] on F.Cu", 1.0, 0.5))])
     )

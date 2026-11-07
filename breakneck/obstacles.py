@@ -130,7 +130,7 @@ class Obstacles:
         self.drills = np.vstack([self.drills, hole])
         if unit.stub is not None:
             s = unit.stub
-            line = LineString([s.start, s.end]).buffer(s.width / 2)
+            line = LineString(s.path).buffer(s.width / 2)
             self.planned.append(_Copper(unit.net, s.layer, line, OTHER_NET_CLEARANCE))
 
     def _nearby(self, geom: BaseGeometry, reach: float) -> Iterator[_Copper]:

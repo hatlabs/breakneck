@@ -183,15 +183,17 @@ def _via_sexpr(u: PlannedUnit) -> str:
     )
 
 
-def _segment_sexpr(u: PlannedUnit) -> str:
-    assert u.stub is not None
+def _segment_sexprs(u: PlannedUnit) -> str:
+    if u.stub is None:
+        return ""
     s = u.stub
-    return (
-        f"\t(segment\n\t\t(start {_num(s.start[0])} {_num(s.start[1])})\n"
-        f"\t\t(end {_num(s.end[0])} {_num(s.end[1])})\n"
+    return "".join(
+        f"\t(segment\n\t\t(start {_num(start[0])} {_num(start[1])})\n"
+        f"\t\t(end {_num(end[0])} {_num(end[1])})\n"
         f"\t\t(width {_num(s.width)})\n\t\t(layer {_quote(s.layer)})\n"
         f"\t\t(net {_quote(u.net)})\n"
         f'\t\t(uuid "{uuid.uuid4()}")\n\t)\n'
+        for start, end in s.legs
     )
 
 
@@ -199,9 +201,7 @@ def inject(board_text: str, units: Sequence[PlannedUnit]) -> str:
     """Board file text with the units added as non-free vias and segments."""
     if not units:
         return board_text
-    items = "".join(
-        _via_sexpr(u) + (_segment_sexpr(u) if u.stub else "") for u in units
-    )
+    items = "".join(_via_sexpr(u) + _segment_sexprs(u) for u in units)
     if FONTS_MARKER in board_text:
         at = board_text.rindex(FONTS_MARKER) + 1
     else:
@@ -406,7 +406,7 @@ def _hits(item: ViolationItem, u: PlannedUnit, layer_names: Mapping[str, str]) -
             for name in (u.stub.layer, layer_names.get(u.stub.layer, u.stub.layer))
         )
     ):
-        stub = LineString([u.stub.start, u.stub.end])
+        stub = LineString(u.stub.path)
         reach = u.stub.width / 2 + POSITION_TOLERANCE
         return stub.distance(Point(item.position)) <= reach
     return False

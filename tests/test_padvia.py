@@ -1,5 +1,6 @@
 import math
 from dataclasses import replace
+from itertools import pairwise
 
 import pytest
 from shapely.geometry import LineString, Point, box
@@ -9,6 +10,7 @@ from breakneck.obstacles import Obstacles
 from breakneck.padvia import PadviaOptions, plan_padvia
 from breakneck.plan import FORBIDDEN_RADIUS, HOLE_TO_HOLE_GAP
 from breakneck.snapshot import (
+    NM_PER_MM,
     Footprint,
     Pad,
     PadKind,
@@ -126,9 +128,10 @@ def with_plan_applied(snap, plan):
         for i, u in enumerate(plan.units)
     ]
     tracks = [
-        track(u.net, u.stub.start, u.stub.end, u.stub.layer, u.stub.width, f"stub{i}")
+        track(u.net, start, end, u.stub.layer, u.stub.width, f"stub{i}.{j}")
         for i, u in enumerate(plan.units)
         if u.stub is not None
+        for j, (start, end) in enumerate(u.stub.legs)
     ]
     return snapshot(
         pads=snap.pads,
@@ -169,8 +172,8 @@ def test_0402_gnd_pad_gets_via_away_from_footprint_centre():
     assert u.position[1] == pytest.approx(10.0, abs=1e-3)
     assert u.stub is not None
     assert u.stub.layer == "F.Cu"
-    assert u.stub.start == pytest.approx((9.52, 10.0))
-    assert u.stub.end == u.position
+    assert u.stub.path[0] == pytest.approx((9.52, 10.0))
+    assert u.stub.path[-1] == u.position
     assert not plan.unfixable
 
 
@@ -540,10 +543,14 @@ def test_stub_through_a_mounting_hole_keep_off_is_rejected():
 
 
 def test_via_may_sit_within_the_via_in_pad_gap_of_its_own_pad():
-    # Rounding the first clear spot to 1 µm pulls it 0.4 µm inside the gap.
-    plan = plan_padvia(snapshot([pad("GND", (10.0004, 10.0))]), GND, [])
+    # The first clear spot on the 45° ray past the pad's corner lies 0.2 µm
+    # outside the gap; rounding it to 1 µm moves it 0.5 µm closer, inside.
+    lane = LineString([CENTRE, (13, 13)]).buffer(0.8)
+    pads = [pad("GND", CENTRE, 0.424, 0.424), blocker("B.Cu", lane, inner=0.0)]
 
-    assert plan.units[0].position == (10.7, 10.0)
+    plan = plan_padvia(snapshot(pads), GND, [])
+
+    assert plan.units[0].position == (10.53, 10.53)
 
 
 # ---- nets derived from zones -------------------------------------------------------
@@ -710,3 +717,227 @@ def test_without_nets_single_layer_pours_are_skipped_without_a_warning(log):
     plan_padvia(snapshot(pads, zones=zones), ALL_NETS, [])
 
     assert not [m for m in log if "SW" in m and "skipping" in m]
+
+
+# ---- 45° stubs -------------------------------------------------------------------
+
+STUB_START = (9.52, 10.003)
+
+
+def nm(v):
+    return round(v * NM_PER_MM)
+
+
+def assert_octilinear(path):
+    """Every leg, in the nanometres KiCad stores, runs at a multiple of 45°."""
+    for a, b in pairwise(path):
+        dx, dy = nm(b[0]) - nm(a[0]), nm(b[1]) - nm(a[1])
+        assert dx == 0 or dy == 0 or abs(dx) == abs(dy), (a, b)
+
+
+def offset(p, d):
+    return padvia._rounded((p[0] + d[0], p[1] + d[1]))
+
+
+@pytest.mark.parametrize(
+    "d",
+    [
+        (0.0, 0.0),
+        (0.7, 0.0),
+        (-0.7, 0.0),
+        (0.0, 0.85),
+        (0.0, -1.1),
+        (0.6, 0.6),
+        (-0.6, 0.6),
+        (0.913, -0.913),
+    ],
+)
+def test_axis_or_diagonal_offset_gives_a_one_segment_stub(d):
+    via = offset(STUB_START, d)
+
+    assert padvia._doglegs(STUB_START, via) == [(STUB_START, via)]
+
+
+@pytest.mark.parametrize(
+    "d",
+    [
+        (1.109, 0.459),
+        (0.459, 1.109),
+        (-0.377, 0.913),
+        (-0.913, 0.377),
+        (-1.2, -0.001),
+        (-0.001, -1.2),
+        (0.001, -0.75),
+        (0.75, -0.001),
+    ],
+)
+def test_general_offset_gives_two_legs_at_45_degree_multiples(d):
+    via = offset(STUB_START, d)
+
+    diagonal_first, straight_first = padvia._doglegs(STUB_START, via)
+
+    for path in (diagonal_first, straight_first):
+        assert len(path) == 3
+        assert path[0] == STUB_START
+        assert path[-1] == via
+        assert_octilinear(path)
+    (x0, y0), (x1, y1) = diagonal_first[:2]
+    assert abs(x1 - x0) == pytest.approx(abs(y1 - y0))
+    (x0, y0), (x1, y1) = straight_first[:2]
+    assert x1 == x0 or y1 == y0
+    short, long = sorted((abs(d[0]), abs(d[1])))
+    for path in (diagonal_first, straight_first):
+        (bx, by) = path[1]
+        assert min(STUB_START[0], via[0]) <= bx <= max(STUB_START[0], via[0])
+        assert min(STUB_START[1], via[1]) <= by <= max(STUB_START[1], via[1])
+        legs = sum(math.dist(a, b) for a, b in pairwise(path))
+        assert legs == pytest.approx(math.sqrt(2) * short + long - short, abs=1e-3)
+
+
+# A via spot 1.2 mm from CENTRE at 22.5°, the only one a B.Cu ring leaves open.
+SPOT = (10.0 + 1.2 * math.cos(math.pi / 8), 10.0 + 1.2 * math.sin(math.pi / 8))
+# Other-net F.Cu copper beside the diagonal-first and the straight-first path.
+BLOCKS_DIAGONAL_FIRST = pad("SIG", (10.35, 10.75), 0.1, 0.1)
+BLOCKS_STRAIGHT_FIRST = pad("SIG", (10.9, 9.75), 0.1, 0.1)
+
+
+def plan_to_spot(*extra, centre=CENTRE):
+    ring = blocker("B.Cu", Point(SPOT).buffer(0.65), centre=centre, inner=0.0)
+    return plan_padvia(snapshot([pad("GND", centre), ring, *extra]), GND, [])
+
+
+def test_free_dogleg_leaves_the_pad_on_the_diagonal():
+    (u,) = plan_to_spot().units
+
+    (cx, cy), bend, via = u.stub.path
+    dy = via[1] - cy
+    assert Point(via).distance(Point(SPOT)) < 0.05
+    assert bend == pytest.approx((cx + dy, cy + dy))
+
+
+def test_blocked_diagonal_first_falls_back_to_straight_first():
+    (u,) = plan_to_spot(BLOCKS_DIAGONAL_FIRST).units
+
+    (_, cy), bend, via = u.stub.path
+    assert Point(via).distance(Point(SPOT)) < 0.05
+    assert bend == pytest.approx((via[0] - (via[1] - cy), cy))
+
+
+def test_spot_with_both_orders_blocked_is_not_used():
+    plan = plan_to_spot(BLOCKS_DIAGONAL_FIRST, BLOCKS_STRAIGHT_FIRST)
+
+    assert plan.units == ()
+    assert len(plan.unfixable) == 1
+
+
+def ray_spot(degrees, t, centre=CENTRE):
+    a = math.radians(degrees)
+    return (centre[0] + t * math.cos(a), centre[1] + t * math.sin(a))
+
+
+def test_search_moves_outward_past_a_spot_with_both_orders_blocked():
+    # A B.Cu ring open at two spots on the 15° ray. Other-net F.Cu copper
+    # below the pad crosses both stub orders to the near spot but not the
+    # diagonal-first stub to the far one.
+    near, far = ray_spot(15, 1.2), ray_spot(15, 1.75)
+    holes = Point(near).buffer(0.65).union(Point(far).buffer(0.65))
+    ring = blocker("B.Cu", holes, inner=0.0)
+    below = pad("SIG", (10.67, 9.81), 0.1, 0.1)
+    gnd = pad("GND", CENTRE)
+    snap = snapshot([gnd, ring, below])
+    obstacles = Obstacles(snap, [])
+    spot = padvia._rounded(near)
+    assert padvia._via_ok(obstacles, spot, "GND", VIA, gnd)
+    assert padvia._clear_dogleg(obstacles, CENTRE, spot, 0.4, "GND", "F.Cu") is None
+
+    (u,) = plan_padvia(snap, GND, []).units
+
+    assert Point(u.position).distance(Point(near)) > 0.3
+
+
+def test_equally_far_spots_prefer_the_one_segment_45_degree_stub():
+    # Without the detour in the score, the 22.5° spot's slightly shorter
+    # search distance would win, at the cost of a dogleg.
+    holes = (
+        Point(ray_spot(45, 1.2))
+        .buffer(0.65)
+        .union(Point(ray_spot(22.5, 1.125)).buffer(0.65))
+    )
+    ring = blocker("B.Cu", holes, inner=0.0)
+
+    (u,) = plan_padvia(snapshot([pad("GND", CENTRE), ring]), GND, []).units
+
+    assert len(u.stub.path) == 2
+    assert Point(u.position).distance(Point(ray_spot(45, 1.2))) < 0.1
+
+
+def test_stub_from_an_off_grid_pad_centre_ends_exactly_at_the_via():
+    (u,) = plan_to_spot(centre=(10.0000004, 9.9999996)).units
+
+    assert len(u.stub.path) == 3
+    assert u.stub.path[-1] == u.position
+    assert_octilinear(u.stub.path)
+
+
+@pytest.mark.parametrize(
+    ("degrees", "centre"),
+    [
+        (45, (10.0004, 9.9996)),
+        (135, (10.0004, 10.0004)),
+        (225, (10.0004, 9.9996)),
+        (315, (10.0004, 10.0004)),
+    ],
+)
+def test_off_grid_pad_centre_on_a_diagonal_ray_gives_one_segment(degrees, centre):
+    # Centres for which a spot stepped from the unrounded centre rounds its x
+    # and y apart, leaving a 1 µm jog after the diagonal.
+    spot = ray_spot(degrees, 1.2, centre)
+    ring = blocker("B.Cu", Point(spot).buffer(0.65), centre=centre, inner=0.0)
+
+    (u,) = plan_padvia(snapshot([pad("GND", centre), ring]), GND, []).units
+
+    assert len(u.stub.path) == 2
+    assert_octilinear(u.stub.path)
+
+
+def busy_board():
+    """0402s at off-grid spots, each beside an other-net track at its own angle."""
+    footprints, pads, tracks = [], [], []
+    for i in range(4):
+        for j in range(3):
+            x, y = 3.1234567 + 6.1 * i, 3.7654321 + 5.3 * j
+            ref = f"R{i}{j}"
+            footprints.append(Footprint(id=ref, ref=ref, position=(x, y), layer="F.Cu"))
+            pads += [
+                pad(
+                    "GND",
+                    (x - 0.48, y),
+                    0.56,
+                    0.62,
+                    footprint_id=ref,
+                    pad_id=f"{ref}.1",
+                ),
+                pad(
+                    "SIG",
+                    (x + 0.48, y),
+                    0.56,
+                    0.62,
+                    footprint_id=ref,
+                    pad_id=f"{ref}.2",
+                ),
+            ]
+            a = 0.3 * (i + 3 * j)
+            near = (x - 2.0, y - 0.4 + 0.1 * j)
+            far = (near[0] + math.sin(a), near[1] + math.cos(a))
+            tracks.append(track(f"T{ref}", near, far, track_id=f"t{ref}"))
+    return snapshot(pads, tracks=tracks, footprints=footprints)
+
+
+def test_every_planned_stub_on_a_busy_board_runs_at_45_degree_multiples():
+    plan = plan_padvia(busy_board(), GND, [])
+
+    assert len(plan.units) >= 10
+    assert sum(len(u.stub.path) == 3 for u in plan.units) >= 3
+    for u in plan.units:
+        assert u.stub.path[-1] == u.position
+        assert_octilinear(u.stub.path)
