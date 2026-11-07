@@ -1,5 +1,7 @@
 # Breakneck: Via Stitching and Manual Neckdown for KiCad Layouts
 
+> **breakneck is now [kistitch](https://pypi.org/project/kistitch/).** This is the last breakneck release; new versions are published as kistitch. Switch with `uv tool uninstall breakneck && uv tool install kistitch`, or run `uvx kistitch`. kistitch drops the `cut` neckdown command, which remains available in this release.
+
 ## Introduction
 
 Breakneck works on the board open in KiCad's PCB editor, through the KiCad IPC API. It has three jobs:

@@ -1,8 +1,8 @@
 [project]
 name = "breakneck"
-version = "0.4.0"
+version = "0.4.1"
 authors = [{ name = "Matti Airas", email = "matti.airas@hatlabs.fi" }]
-description = "DRC-checked placement of return, pad and pour stitching vias, return and coverage heatmaps and manual neckdowns for KiCad"
+description = "Renamed to kistitch: install kistitch instead. DRC-checked placement of return, pad and pour stitching vias for KiCad"
 readme = "README.md"
 requires-python = ">=3.11"
 classifiers = [
@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/hatlabs/breakneck"
+Homepage = "https://github.com/hatlabs/kistitch"
 
 [project.scripts]
 breakneck = "breakneck.cli:main"
