@@ -6,17 +6,17 @@ import sys
 import pytest
 from loguru import logger
 
-from breakneck import cli, overlay, placement, pourstitch_command, returnvia_command
-from breakneck.cli import parse_via_size
-from breakneck.plan import (
+from kistitch import cli, overlay, placement, pourstitch_command, returnvia_command
+from kistitch.cli import parse_via_size
+from kistitch.plan import (
     POURSTITCH_GROUND_DISTANCE,
     POURSTITCH_POWER_DISTANCE,
     StitchClass,
 )
-from breakneck.pourstitch import OtherClassNetsError
-from breakneck.returnpath import NoBoardOutlineError
-from breakneck.returnvia import NoGroundNetsError
-from breakneck.snapshot import ViaSize
+from kistitch.pourstitch import OtherClassNetsError
+from kistitch.returnpath import NoBoardOutlineError
+from kistitch.returnvia import NoGroundNetsError
+from kistitch.snapshot import ViaSize
 
 
 def test_via_size_parses_diameter_and_drill():
@@ -38,9 +38,9 @@ def test_bad_via_size_is_rejected(text):
     ],
 )
 def test_placement_commands_take_allow_splits(monkeypatch, argv):
-    monkeypatch.setattr(sys, "argv", ["breakneck", *argv])
+    monkeypatch.setattr(sys, "argv", ["kistitch", *argv])
     assert not cli.parse_args().allow_splits
-    monkeypatch.setattr(sys, "argv", ["breakneck", *argv, "--allow-splits"])
+    monkeypatch.setattr(sys, "argv", ["kistitch", *argv, "--allow-splits"])
     assert cli.parse_args().allow_splits
 
 
@@ -63,7 +63,7 @@ def test_padvia_failure_exits_cleanly(monkeypatch, error):
 
 
 def parsed(monkeypatch, argv):
-    monkeypatch.setattr(sys, "argv", ["breakneck", *argv])
+    monkeypatch.setattr(sys, "argv", ["kistitch", *argv])
     return cli.parse_args()
 
 
@@ -332,7 +332,7 @@ def test_main_logs_info_by_default(monkeypatch, capsys):
 def test_importing_the_cli_leaves_scipy_skimage_and_matplotlib_unloaded():
     # A subprocess, because this test session has already imported them.
     code = (
-        "import sys, breakneck.cli; "
+        "import sys, kistitch.cli; "
         "print([m for m in ('scipy', 'skimage', 'matplotlib') if m in sys.modules])"
     )
     result = subprocess.run(

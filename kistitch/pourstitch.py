@@ -26,7 +26,7 @@ from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
-from breakneck.plan import (
+from kistitch.plan import (
     EDGE_GAP,
     FORBIDDEN_RADIUS,
     HOLE_TO_HOLE_GAP,
@@ -41,7 +41,7 @@ from breakneck.plan import (
     UnfixableSpot,
     pad_clearance,
 )
-from breakneck.raster import (
+from kistitch.raster import (
     BoolMap,
     CoverageMap,
     FloatMap,
@@ -52,8 +52,8 @@ from breakneck.raster import (
     touch,
     uncovered,
 )
-from breakneck.returnvia import NoGroundNetsError, resolve_ground_nets
-from breakneck.snapshot import MIN_STITCH_LAYERS, PadKind, Point2, Snapshot, ViaSize
+from kistitch.returnvia import NoGroundNetsError, resolve_ground_nets
+from kistitch.snapshot import MIN_STITCH_LAYERS, PadKind, Point2, Snapshot, ViaSize
 
 VIA_SPACING = 0.9
 IN_FILL_MARGIN = 0.05

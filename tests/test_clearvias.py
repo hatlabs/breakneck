@@ -5,10 +5,10 @@ import pytest
 from kipy.errors import ConnectionError as KiCadConnectionError
 from shapely.geometry import LineString, box
 
-from breakneck import cli
-from breakneck.clearvias import stitching_vias
-from breakneck.commit import eco2_segment
-from breakneck.snapshot import Pad, PadKind, Snapshot, Track, Via, Zone
+from kistitch import cli
+from kistitch.clearvias import stitching_vias
+from kistitch.commit import eco2_segment
+from kistitch.snapshot import Pad, PadKind, Snapshot, Track, Via, Zone
 
 TWO_LAYERS = ("F.Cu", "B.Cu")
 GND_AREA = box(0, 0, 20, 20)
@@ -99,7 +99,7 @@ def test_nets_limit_the_removal():
     assert stitching_vias(snapshot([gnd, power]), nets=["GND"]) == [gnd]
 
 
-# ---- breakneck clear --vias ------------------------------------------------------
+# ---- kistitch clear --vias -------------------------------------------------------
 
 
 class ViaBoard:
@@ -159,7 +159,7 @@ def clear(monkeypatch, snap, argv, **board_args):
     board = ViaBoard([kipy_via(v.id) for v in snap.vias], **board_args)
     monkeypatch.setattr(cli.kipy, "KiCad", lambda: FakeKiCad(board))
     monkeypatch.setattr(cli.Snapshot, "from_board", staticmethod(lambda b: snap))
-    monkeypatch.setattr(sys, "argv", ["breakneck", *argv])
+    monkeypatch.setattr(sys, "argv", ["kistitch", *argv])
     cli.execute_clear(cli.parse_args())
     return board
 
@@ -177,7 +177,7 @@ def test_clear_vias_removes_them_in_one_commit_then_refills(monkeypatch, log):
         "push_commit",
         "refill_zones",
     ]
-    assert board.labels[0].startswith("breakneck clear ")
+    assert board.labels[0].startswith("kistitch clear ")
 
 
 def test_clear_vias_and_markers_go_in_one_remove(monkeypatch):
@@ -207,7 +207,7 @@ def test_clear_vias_still_refills_when_the_push_times_out(monkeypatch, log):
 
 
 def test_clear_nets_without_vias_is_a_usage_error(monkeypatch, capsys):
-    monkeypatch.setattr(sys, "argv", ["breakneck", "clear", "--nets", "GND"])
+    monkeypatch.setattr(sys, "argv", ["kistitch", "clear", "--nets", "GND"])
 
     with pytest.raises(SystemExit) as exc:
         cli.parse_args()

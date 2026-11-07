@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 from shapely.geometry import Point
 
-from breakneck import raster
-from breakneck.raster import Grid, geodesic, touch
+from kistitch import raster
+from kistitch.raster import Grid, geodesic, touch
 
 PIXEL = 0.1
 

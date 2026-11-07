@@ -16,11 +16,11 @@ from kipy.proto.common.envelope_pb2 import ApiStatusCode
 from kipy.proto.common.types import DocumentSpecifier
 from loguru import logger
 
-from breakneck import commit, drc, placement
-from breakneck.commit import Marker, MarkerKind
-from breakneck.plan import Plan, PlannedUnit, Stub, UnfixableSpot
-from breakneck.returnpath import NoBoardOutlineError
-from breakneck.snapshot import NM_PER_MM, Snapshot, ViaSize
+from kistitch import commit, drc, placement
+from kistitch.commit import Marker, MarkerKind
+from kistitch.plan import Plan, PlannedUnit, Stub, UnfixableSpot
+from kistitch.returnpath import NoBoardOutlineError
+from kistitch.snapshot import NM_PER_MM, Snapshot, ViaSize
 
 VIA = ViaSize(0.6, 0.3)
 BOARD_CHANGES = {
@@ -584,7 +584,7 @@ def test_commit_creates_items_and_markers_in_one_commit():
     assert track.layer == BL.BL_F_Cu and track.width == 300_000
     assert all(m.layer == BL.BL_Eco2_User for m in marks)
     pushes = [c for c in board.calls if isinstance(c, tuple)]
-    assert len(pushes) == 1 and pushes[0][1].startswith("breakneck pourstitch ")
+    assert len(pushes) == 1 and pushes[0][1].startswith("kistitch pourstitch ")
     assert board.calls.count("begin_commit") == 1
     assert created == 3
 
@@ -699,7 +699,7 @@ def test_commit_with_unknown_net_fails_before_opening_a_commit():
 def test_commit_label_carries_command_and_timestamp():
     assert (
         commit.commit_label("padvia", datetime(2026, 10, 26, 14, 5, 9))
-        == "breakneck padvia 2026-10-26 14:05:09"
+        == "kistitch padvia 2026-10-26 14:05:09"
     )
 
 

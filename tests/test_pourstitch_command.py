@@ -7,12 +7,12 @@ from kipy.geometry import Vector2
 from kipy.proto.board.board_types_pb2 import BoardLayer as BL
 from shapely.geometry import box
 
-from breakneck import cli, drc, overlay, pourstitch_command, render
-from breakneck.commit import MARKER_LAYER, eco2_segment
-from breakneck.placement import RunResult, RunSettings
-from breakneck.plan import POURSTITCH_POWER_DISTANCE, StitchClass
-from breakneck.pourstitch import Options
-from breakneck.snapshot import NM_PER_MM, NoBoardOutlineError, Snapshot, ViaSize, Zone
+from kistitch import cli, drc, overlay, pourstitch_command, render
+from kistitch.commit import MARKER_LAYER, eco2_segment
+from kistitch.placement import RunResult, RunSettings
+from kistitch.plan import POURSTITCH_POWER_DISTANCE, StitchClass
+from kistitch.pourstitch import Options
+from kistitch.snapshot import NM_PER_MM, NoBoardOutlineError, Snapshot, ViaSize, Zone
 
 LAYERS = ("F.Cu", "B.Cu")
 POUR = box(0, 0, 10, 10)

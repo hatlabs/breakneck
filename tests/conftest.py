@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from loguru import logger
 
-from breakneck import commit, overlay
+from kistitch import commit, overlay
 
 
 @pytest.fixture(autouse=True)

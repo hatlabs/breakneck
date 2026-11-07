@@ -5,24 +5,24 @@ from dataclasses import replace
 import pytest
 from shapely.geometry import LineString, Point, box
 
-from breakneck import cli, returnvia_command
-from breakneck.plan import (
+from kistitch import cli, returnvia_command
+from kistitch.plan import (
     EDGE_GAP,
     FORBIDDEN_RADIUS,
     HOLE_TO_HOLE_GAP,
     OTHER_NET_CLEARANCE,
     SAME_NET_PAD_GAP,
 )
-from breakneck.returnpath import measure_returns
-from breakneck.returnvia import (
+from kistitch.returnpath import measure_returns
+from kistitch.returnvia import (
     NoGroundNetsError,
     ReferencePlane,
     ReturnViaOptions,
     resolve_ground_nets,
     via_references,
 )
-from breakneck.returnvia_planner import ReturnViaPlanner
-from breakneck.snapshot import (
+from kistitch.returnvia_planner import ReturnViaPlanner
+from kistitch.snapshot import (
     Pad,
     PadKind,
     Snapshot,
@@ -564,7 +564,7 @@ def test_returnvia_without_a_ground_exits_with_an_error(monkeypatch):
 
 
 def _parse(monkeypatch, *argv):
-    monkeypatch.setattr(sys, "argv", ["breakneck", *argv])
+    monkeypatch.setattr(sys, "argv", ["kistitch", *argv])
     return cli.parse_args()
 
 

@@ -8,15 +8,15 @@ import kipy
 import kipy.board
 from loguru import logger
 
-from breakneck import overlay, render
-from breakneck.placement import RunSettings, check_outline, measure_only, run_placement
-from breakneck.plan import Plan
-from breakneck.pourstitch import Options, PourStitcher, summarise
-from breakneck.raster import CoverageMap, Grid
-from breakneck.snapshot import Snapshot
+from kistitch import overlay, render
+from kistitch.placement import RunSettings, check_outline, measure_only, run_placement
+from kistitch.plan import Plan
+from kistitch.pourstitch import Options, PourStitcher, summarise
+from kistitch.raster import CoverageMap, Grid
+from kistitch.snapshot import Snapshot
 
 COMMAND = "pourstitch"
-OVERLAY_COMMIT = "breakneck pourstitch overlay"
+OVERLAY_COMMIT = "kistitch pourstitch overlay"
 OVER_COLOUR = "#ff2a6d"
 EMPTY_TITLE = "Pour stitching: no {nets} nets to stitch"
 STYLE = render.HeatmapStyle(

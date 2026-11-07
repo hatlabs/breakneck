@@ -10,30 +10,30 @@ import kipy.board
 import kipy.board_types
 from loguru import logger
 
-import breakneck.overlay
-from breakneck.clearvias import stitching_vias
-from breakneck.commit import (
+import kistitch.overlay
+from kistitch.clearvias import stitching_vias
+from kistitch.commit import (
     commit_label,
     marker_shapes,
     push_tolerant,
     refill_after_commit,
 )
-from breakneck.overlay import DEFAULT_OVERLAY_LAYERS
-from breakneck.padvia import PadviaOptions, plan_padvia
-from breakneck.placement import (
+from kistitch.overlay import DEFAULT_OVERLAY_LAYERS
+from kistitch.padvia import PadviaOptions, plan_padvia
+from kistitch.placement import (
     BoardChangedError,
     RunSettings,
     SplitError,
     run_placement,
 )
-from breakneck.plan import (
+from kistitch.plan import (
     POURSTITCH_FALLBACK_VIA,
     POURSTITCH_GROUND_DISTANCE,
     POURSTITCH_POWER_DISTANCE,
     StitchClass,
 )
-from breakneck.returnvia import DEFAULT_DISTANCE, NoGroundNetsError, ReturnViaOptions
-from breakneck.snapshot import (
+from kistitch.returnvia import DEFAULT_DISTANCE, NoGroundNetsError, ReturnViaOptions
+from kistitch.snapshot import (
     NoBoardOutlineError,
     Snapshot,
     ViaSize,
@@ -151,7 +151,7 @@ def _add_ground_nets_argument(parser: argparse.ArgumentParser) -> None:
 
 
 def execute_returnvia(args):
-    from breakneck import returnvia_command
+    from kistitch import returnvia_command
 
     options = ReturnViaOptions(
         distance=args.distance,
@@ -159,14 +159,14 @@ def execute_returnvia(args):
         via=args.via,
         force=args.force,
     )
-    outputs = breakneck.overlay.Outputs(
+    outputs = kistitch.overlay.Outputs(
         render=args.render,
         overlay=args.overlay,
         overlay_layers=tuple(args.overlay_layers),
     )
     with _exit_on(
         NoGroundNetsError,
-        breakneck.overlay.OverlayLayersError,
+        kistitch.overlay.OverlayLayersError,
         *PLACEMENT_ERRORS,
     ):
         returnvia_command.execute(
@@ -218,14 +218,14 @@ def parse_args():
 
     clear_parser = subparsers.add_parser(
         "clear",
-        help="Remove annotations from User.Eco2 and breakneck's overlay images",
+        help="Remove annotations from User.Eco2 and kistitch's overlay images",
     )
     clear_parser.add_argument(
         "--overlay-layers",
         nargs="+",
         metavar="LAYER",
         default=list(DEFAULT_OVERLAY_LAYERS),
-        help="User layers to remove breakneck overlays from",
+        help="User layers to remove kistitch overlays from",
     )
     clear_parser.add_argument(
         "--vias",
@@ -290,10 +290,10 @@ def execute_clear(args):
     images = (
         []
         if outline.is_empty
-        else breakneck.overlay.overlays_on(
+        else kistitch.overlay.overlays_on(
             board,
             args.overlay_layers,
-            breakneck.overlay.board_placement(outline.bounds),
+            kistitch.overlay.board_placement(outline.bounds),
         )
     )
 
@@ -366,7 +366,7 @@ def execute_padvia(args):
 
 
 def execute_pourstitch(args):
-    from breakneck import pourstitch, pourstitch_command
+    from kistitch import pourstitch, pourstitch_command
 
     options = pourstitch.Options(
         nets=None if args.nets is None else tuple(args.nets),
@@ -376,7 +376,7 @@ def execute_pourstitch(args):
         via=args.via,
         fallback_via=args.fallback_via,
     )
-    outputs = breakneck.overlay.Outputs(
+    outputs = kistitch.overlay.Outputs(
         render=args.render,
         overlay=args.overlay,
         overlay_layers=tuple(args.overlay_layers),
@@ -384,7 +384,7 @@ def execute_pourstitch(args):
     with _exit_on(
         NoGroundNetsError,
         pourstitch.OtherClassNetsError,
-        breakneck.overlay.OverlayLayersError,
+        kistitch.overlay.OverlayLayersError,
         *PLACEMENT_ERRORS,
     ):
         pourstitch_command.execute(

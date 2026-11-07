@@ -2,7 +2,7 @@
 
 Built once from a snapshot and grown with every unit a planner places, so
 padvia and returnvia judge spots against the same rules. The rule values
-live in `breakneck.plan`.
+live in `kistitch.plan`.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from shapely.geometry.base import BaseGeometry
 from shapely.prepared import PreparedGeometry, prep
 from shapely.strtree import STRtree
 
-from breakneck.plan import (
+from kistitch.plan import (
     EDGE_GAP,
     FORBIDDEN_RADIUS,
     HOLE_TO_HOLE_GAP,
@@ -27,7 +27,7 @@ from breakneck.plan import (
     PlannedUnit,
     pad_clearance,
 )
-from breakneck.snapshot import MIN_STITCH_LAYERS, PadKind, Point2, Snapshot, ViaSize
+from kistitch.snapshot import MIN_STITCH_LAYERS, PadKind, Point2, Snapshot, ViaSize
 
 
 @dataclass(frozen=True)

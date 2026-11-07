@@ -1,5 +1,5 @@
 [project]
-name = "breakneck"
+name = "kistitch"
 version = "0.4.0"
 authors = [{ name = "Matti Airas", email = "matti.airas@hatlabs.fi" }]
 description = "DRC-checked placement of return, pad and pour stitching vias for KiCad, with return and coverage heatmaps"
@@ -14,7 +14,7 @@ classifiers = [
 ]
 license = "MIT"
 license-files = ["LICENSE"]
-keywords = ["KiCad", "EDA", "PCB", "stitching", "breakneck"]
+keywords = ["KiCad", "EDA", "PCB", "stitching", "vias"]
 
 dependencies = [
     "kicad-python >= 0.8.0",
@@ -28,10 +28,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/hatlabs/breakneck"
+Homepage = "https://github.com/hatlabs/kistitch"
 
 [project.scripts]
-breakneck = "breakneck.cli:main"
+kistitch = "kistitch.cli:main"
 
 [dependency-groups]
 dev = [

@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 from kipy.errors import ApiError
 
-from breakneck import drc
-from breakneck.plan import Plan, PlannedUnit, Stub, UnfixableSpot
-from breakneck.snapshot import Snapshot, ViaSize
+from kistitch import drc
+from kistitch.plan import Plan, PlannedUnit, Stub, UnfixableSpot
+from kistitch.snapshot import Snapshot, ViaSize
 
 VIA = ViaSize(0.6, 0.3)
 

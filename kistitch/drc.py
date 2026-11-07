@@ -20,8 +20,8 @@ from kipy.errors import ConnectionError as KiCadConnectionError
 from loguru import logger
 from shapely.geometry import LineString, Point
 
-from breakneck.plan import Plan, PlannedUnit, Planner
-from breakneck.snapshot import Point2, Snapshot
+from kistitch.plan import Plan, PlannedUnit, Planner
+from kistitch.snapshot import Point2, Snapshot
 
 KICAD_CLI = "kicad-cli"
 KNOWN_KICAD_CLI_PATHS: tuple[str, ...] = (

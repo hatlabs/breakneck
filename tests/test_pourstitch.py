@@ -6,7 +6,7 @@ import pytest
 from shapely.geometry import Point, box
 from shapely.ops import unary_union
 
-from breakneck.plan import (
+from kistitch.plan import (
     EDGE_GAP,
     FORBIDDEN_RADIUS,
     OTHER_NET_CLEARANCE,
@@ -15,7 +15,7 @@ from breakneck.plan import (
     PlannedUnit,
     StitchClass,
 )
-from breakneck.pourstitch import (
+from kistitch.pourstitch import (
     QUANTISATION,
     Options,
     OtherClassNetsError,
@@ -23,8 +23,8 @@ from breakneck.pourstitch import (
     lattice_sites,
     summarise,
 )
-from breakneck.returnvia import NoGroundNetsError
-from breakneck.snapshot import Pad, PadKind, Snapshot, Via, ViaSize, Zone
+from kistitch.returnvia import NoGroundNetsError
+from kistitch.snapshot import Pad, PadKind, Snapshot, Via, ViaSize, Zone
 
 TWO_LAYERS = ("F.Cu", "B.Cu")
 D = 2.5

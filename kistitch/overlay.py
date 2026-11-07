@@ -4,7 +4,7 @@ KiCad places a reference image by its centre and sizes it as
 pixels × (25.4 mm / PPI) × scale, with the PPI read from the PNG. The
 overlay PNGs are written at `OVERLAY_PPI` and scaled so that one image pixel
 is one raster pixel. Each carries a PNG text chunk that marks it as
-breakneck's; KiCad keeps it in the image data it reports back.
+kistitch's; KiCad keeps it in the image data it reports back.
 """
 
 from __future__ import annotations
@@ -23,31 +23,33 @@ from kipy.geometry import Vector2
 from kipy.util.board_layer import canonical_name, layer_from_canonical_name
 from loguru import logger
 
-from breakneck.commit import (
+from kistitch.commit import (
     CreateItemsError,
     Marker,
     create_checked,
     marker_items,
     marker_shapes,
 )
-from breakneck.plan import POURSTITCH_PIXEL, raster_size
-from breakneck.snapshot import NM_PER_MM, Point2, Snapshot
+from kistitch.plan import POURSTITCH_PIXEL, raster_size
+from kistitch.snapshot import NM_PER_MM, Point2, Snapshot
 
 DEFAULT_OVERLAY_LAYERS = ("User.1", "User.2", "User.3", "User.4")
 MM_PER_INCH = 25.4
 # 254 PPI is exactly 0.1 mm per pixel and exactly 10000 pixels per metre in
 # the PNG pHYs chunk, so neither side has to round.
 OVERLAY_PPI = 254
-OVERLAY_TAG = ("breakneck", "pourstitch-overlay")
+OVERLAY_TAG = ("kistitch", "pourstitch-overlay")
+# Overlays placed before the project was renamed from breakneck carry this.
+BREAKNECK_OVERLAY_TAG = ("breakneck", "pourstitch-overlay")
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 PNG_CHUNK_HEADER = struct.Struct(">I4s")
 PNG_CRC_SIZE = 4
 PNG_IHDR_SIZE = struct.Struct(">II")
 # Untagged overlays from earlier builds are recognised by their placement:
-# an image within these of it is taken as breakneck's.
+# an image within these of it is taken as kistitch's.
 POSITION_TOLERANCE_NM = 1000
 SCALE_TOLERANCE = 1e-6
-PNG_DIR_PREFIX = "breakneck-overlay-"
+PNG_DIR_PREFIX = "kistitch-overlay-"
 
 
 @dataclass(frozen=True)
@@ -190,13 +192,15 @@ def is_overlay(
     placement: ImagePlacement,
     layers: Sequence[str],
 ) -> bool:
-    """Whether `image` is a breakneck overlay: on an overlay layer, and
+    """Whether `image` is a kistitch overlay: on an overlay layer, and
     either tagged as one or at the overlay placement for this board.
     Anything else is the user's own."""
     if canonical_name(image.layer) not in layers:
         return False
-    key, value = OVERLAY_TAG
-    if png_text(image.image_data).get(key) == value:
+    text = png_text(image.image_data)
+    if any(
+        text.get(key) == value for key, value in (OVERLAY_TAG, BREAKNECK_OVERLAY_TAG)
+    ):
         return True
     x, y = placement.centre
     return (
@@ -220,7 +224,7 @@ def place_overlays(
     commit_label: str,
     markers: Sequence[Marker] | None = None,
 ) -> bool:
-    """Replace breakneck's overlays on the overlay layers in one commit.
+    """Replace kistitch's overlays on the overlay layers in one commit.
 
     `placement` is the board's overlay placement, which finds untagged
     overlays of earlier builds. With no images, the previous set is only

@@ -26,9 +26,9 @@ from loguru import logger
 from shapely.geometry import LineString, Point
 from shapely.geometry.base import BaseGeometry
 
-from breakneck.obstacles import Obstacles
-from breakneck.plan import Plan, PlannedUnit, Stub, UnfixableSpot
-from breakneck.snapshot import Pad, PadKind, Point2, Snapshot, ViaSize
+from kistitch.obstacles import Obstacles
+from kistitch.plan import Plan, PlannedUnit, Stub, UnfixableSpot
+from kistitch.snapshot import Pad, PadKind, Point2, Snapshot, ViaSize
 
 OWN_PAD_GAP = 0.15
 

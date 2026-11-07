@@ -34,48 +34,6 @@ wheels = [
 ]
 
 [[package]]
-name = "breakneck"
-version = "0.4.0"
-source = { editable = "." }
-dependencies = [
-    { name = "kicad-python" },
-    { name = "loguru" },
-    { name = "matplotlib" },
-    { name = "numpy" },
-    { name = "scikit-image" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "shapely" },
-    { name = "svgpathtools" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "ipykernel" },
-    { name = "pytest" },
-    { name = "pytest-xdist" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "kicad-python", specifier = ">=0.8.0" },
-    { name = "loguru", specifier = ">=0.7.2" },
-    { name = "matplotlib", specifier = ">=3.10.0" },
-    { name = "numpy", specifier = ">=2.0" },
-    { name = "scikit-image", specifier = ">=0.25" },
-    { name = "scipy", specifier = ">=1.14" },
-    { name = "shapely", specifier = ">=2.0.7" },
-    { name = "svgpathtools", specifier = ">=1.6.1" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "ipykernel", specifier = ">=6.29.5" },
-    { name = "pytest", specifier = ">=8.3.4" },
-    { name = "pytest-xdist", specifier = ">=3.8.0" },
-]
-
-[[package]]
 name = "cffi"
 version = "1.17.1"
 source = { registry = "https://pypi.org/simple" }
@@ -431,6 +389,48 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/db/39/734073fef0e69b48be18122c6e741f95ec0f3f15b4d5f313112970578350/kicad_python-0.8.0.tar.gz", hash = "sha256:6d51b9a3098f3196927f9ce124adc160450862cf287dc3994dec4de4f968e0fa", size = 971584, upload-time = "2026-08-30T20:05:45.339Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/68/9a/81dfe3d0385c60e0dfd51149d72e9247bbacabfa558a29274a22caab8d85/kicad_python-0.8.0-py3-none-any.whl", hash = "sha256:3d43af4aa2515e88829a9d30e408b8ce89537431a802104ee2a50392f0deaa16", size = 222341, upload-time = "2026-08-30T20:14:10.787Z" },
+]
+
+[[package]]
+name = "kistitch"
+version = "0.4.0"
+source = { editable = "." }
+dependencies = [
+    { name = "kicad-python" },
+    { name = "loguru" },
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "scikit-image" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "shapely" },
+    { name = "svgpathtools" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "ipykernel" },
+    { name = "pytest" },
+    { name = "pytest-xdist" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "kicad-python", specifier = ">=0.8.0" },
+    { name = "loguru", specifier = ">=0.7.2" },
+    { name = "matplotlib", specifier = ">=3.10.0" },
+    { name = "numpy", specifier = ">=2.0" },
+    { name = "scikit-image", specifier = ">=0.25" },
+    { name = "scipy", specifier = ">=1.14" },
+    { name = "shapely", specifier = ">=2.0.7" },
+    { name = "svgpathtools", specifier = ">=1.6.1" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "ipykernel", specifier = ">=6.29.5" },
+    { name = "pytest", specifier = ">=8.3.4" },
+    { name = "pytest-xdist", specifier = ">=3.8.0" },
 ]
 
 [[package]]
