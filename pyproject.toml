@@ -1,6 +1,6 @@
 [project]
 name = "kistitch"
-version = "0.4.0"
+version = "0.5.0"
 authors = [{ name = "Matti Airas", email = "matti.airas@hatlabs.fi" }]
 description = "DRC-checked placement of return, pad and pour stitching vias for KiCad, with return and coverage heatmaps"
 readme = "README.md"
