@@ -1193,7 +1193,7 @@ def eco2_created(fakes) -> list:
     return [i.proto for i in fakes.created if i.layer == MARKER_LAYER]
 
 
-def test_check_overlay_replaces_markers_with_an_x_per_unserved_end(fakes):
+def test_check_overlay_replaces_markers_with_a_circle_per_unserved_end(fakes):
     # In1's slot leaves the F.Cu end unserved; the B.Cu end is served.
     fakes.snap = slotted((SIG[0] + 1.4, SIG[1]))
     stale = old_marker()
@@ -1208,7 +1208,8 @@ def test_check_overlay_replaces_markers_with_an_x_per_unserved_end(fakes):
         ("push_commit", returnvia_command.OVERLAY_COMMIT),
     ]
     assert stale in board.removed
-    expected = marker_items([Marker(SIG, MarkerKind.UNFIXABLE)])
+    radius = next(v.diameter / 2 for v in fakes.snap.vias if v.position == SIG)
+    expected = marker_items([Marker(SIG, MarkerKind.UNFIXABLE, extent=radius)])
     assert eco2_created(fakes) == [i.proto for i in expected]
 
 
@@ -1259,7 +1260,7 @@ def test_placing_run_overlay_leaves_the_markers_to_the_placement(fakes):
     assert eco2_created(fakes) == []
 
 
-def test_unserved_markers_put_one_x_at_each_via_with_an_unserved_end():
+def test_unserved_markers_put_one_circle_at_each_via_with_an_unserved_end():
     def end(position, layer, served):
         plane = ReferencePlane("In1.Cu" if layer == "F.Cu" else "In2.Cu", "GND")
         return PlaneReturn(
@@ -1276,7 +1277,14 @@ def test_unserved_markers_put_one_x_at_each_via_with_an_unserved_end():
         end(served, "B.Cu", True),
     ]
 
-    assert returnvia_command.unserved_markers(results) == (
-        Marker(both_unserved, MarkerKind.UNFIXABLE),
-        Marker(one_unserved, MarkerKind.UNFIXABLE),
+    vias = [
+        Via(f"v{i}", "SIG", p, diameter, 0.3)
+        for i, (p, diameter) in enumerate(
+            [(both_unserved, 0.8), (one_unserved, 0.6), (served, 0.6)]
+        )
+    ]
+
+    assert returnvia_command.unserved_markers(results, vias) == (
+        Marker(both_unserved, MarkerKind.UNFIXABLE, extent=0.4),
+        Marker(one_unserved, MarkerKind.UNFIXABLE, extent=0.3),
     )
