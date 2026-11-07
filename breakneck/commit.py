@@ -144,13 +144,14 @@ def unit_items(
         via.net = nets[u.net]
         out.append(via)
         if u.stub is not None:
-            track = kipy.board_types.Track()
-            track.start = _vec(u.stub.start)
-            track.end = _vec(u.stub.end)
-            track.width = _nm(u.stub.width)
-            track.layer = layer_ids[u.stub.layer]
-            track.net = nets[u.net]
-            out.append(track)
+            for start, end in u.stub.legs:
+                track = kipy.board_types.Track()
+                track.start = _vec(start)
+                track.end = _vec(end)
+                track.width = _nm(u.stub.width)
+                track.layer = layer_ids[u.stub.layer]
+                track.net = nets[u.net]
+                out.append(track)
     return out
 
 
@@ -197,7 +198,7 @@ def commit_units(
     """Remove the stale markers and create the units plus the new Eco2 markers
     as one commit.
 
-    Returns the number of placed vias and stubs.
+    Returns the number of placed vias and tracks.
     """
     nets = {n.name: n for n in board.get_nets()}
     missing = sorted({u.net for u in units} - nets.keys())

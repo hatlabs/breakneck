@@ -272,7 +272,7 @@ def test_same_net_tracks_and_vias_do_not_count_as_pads():
 
 def test_planned_via_and_stub_block_other_nets():
     obs = obstacles()
-    stub = Stub(start=(5, 10), end=(10, 10), width=0.3, layer="F.Cu")
+    stub = Stub(path=((5, 10), (10, 10)), width=0.3, layer="F.Cu")
     obs.add_unit(PlannedUnit((10, 10), "GND", VIA, stub=stub))
     stub_probe = LineString([(7, 9.6), (8, 9.6)])
 
@@ -280,6 +280,17 @@ def test_planned_via_and_stub_block_other_nets():
     assert not via_clashes(obs, (10.8, 10), net="GND")
     assert obs.clashes_with_other_nets(stub_probe, 0.1, "SIG", "F.Cu")
     assert not obs.clashes_with_other_nets(stub_probe, 0.1, "SIG", "B.Cu")
+
+
+@pytest.mark.parametrize("probe", [(6.5, 10.9), (8.5, 11.2)])
+def test_planned_dogleg_stub_blocks_other_nets_near_either_leg(probe):
+    obs = obstacles()
+    stub = Stub(path=((5, 9), (7, 11), (10, 11)), width=0.3, layer="F.Cu")
+    obs.add_unit(PlannedUnit((10, 11), "GND", VIA, stub=stub))
+    far = (6, 11)
+
+    assert obs.clashes_with_other_nets(Point(probe), 0.1, "SIG", "F.Cu")
+    assert not obs.clashes_with_other_nets(Point(far), 0.1, "SIG", "F.Cu")
 
 
 def test_nearby_copper_selects_net_and_exact_layer_including_planned():

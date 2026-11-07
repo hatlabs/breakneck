@@ -239,7 +239,7 @@ def _plan_pad(
         position=pos,
         net=pad.net,
         size=size,
-        stub=Stub(start=(cx, cy), end=pos, width=width, layer=layer),
+        stub=Stub(path=((cx, cy), pos), width=width, layer=layer),
     )
 
 

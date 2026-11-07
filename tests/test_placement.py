@@ -569,7 +569,7 @@ def test_second_unconnected_item_on_the_same_net_is_a_split(saved_board, monkeyp
 
 def test_commit_creates_items_and_markers_in_one_commit():
     board = RecordingBoard()
-    stub = Stub(start=(0, 0), end=(1, 0), width=0.3, layer="F.Cu")
+    stub = Stub(path=((0, 0), (1, 0)), width=0.3, layer="F.Cu")
     units = [unit(1, 0, stub=stub), unit(5, 5, net="+3.3V")]
     markers = [Marker((9, 9), MarkerKind.UNFIXABLE)]
 
@@ -589,11 +589,31 @@ def test_commit_creates_items_and_markers_in_one_commit():
     assert created == 3
 
 
+def test_unit_items_make_one_track_per_stub_leg():
+    stub = Stub(path=((0, 0), (1, 1), (3, 1)), width=0.3, layer="F.Cu")
+    nets = {"GND": kipy.board_types.Net()}
+    nets["GND"].name = "GND"
+
+    items = commit.unit_items([unit(3, 1, stub=stub)], nets, {"F.Cu": BL.BL_F_Cu})
+
+    via, *tracks = items
+    assert isinstance(via, kipy.board_types.Via)
+    mm = lambda v: (v.x / NM_PER_MM, v.y / NM_PER_MM)
+    assert [(mm(t.start), mm(t.end)) for t in tracks] == [
+        ((0, 0), (1, 1)),
+        ((1, 1), (3, 1)),
+    ]
+    for t in tracks:
+        assert t.width == 300_000
+        assert t.layer == BL.BL_F_Cu
+        assert t.net.name == "GND"
+
+
 def test_commit_refused_item_raises_and_drops_the_commit():
     # KiCad reports refusals per item instead of failing the request, and
     # kipy's create_items discards those statuses.
     board = RecordingBoard(refuse=lambda item: isinstance(item, kipy.board_types.Track))
-    stub = Stub(start=(0, 0), end=(1, 0), width=0.3, layer="F.Cu")
+    stub = Stub(path=((0, 0), (1, 0)), width=0.3, layer="F.Cu")
 
     with pytest.raises(commit.CreateItemsError, match="no overlapping layers"):
         commit.commit_units(

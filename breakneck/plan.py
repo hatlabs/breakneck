@@ -9,6 +9,7 @@ import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
+from itertools import pairwise
 from typing import TypeVar
 
 from breakneck.snapshot import Point2, Snapshot, ViaSize
@@ -71,12 +72,15 @@ def raster_size(
 
 @dataclass(frozen=True)
 class Stub:
-    """Track from a pad to its planned via."""
+    """Track from a pad to its planned via: a path of one or two legs."""
 
-    start: Point2
-    end: Point2
+    path: tuple[Point2, ...]
     width: float
     layer: str
+
+    @property
+    def legs(self) -> tuple[tuple[Point2, Point2], ...]:
+        return tuple(pairwise(self.path))
 
 
 @dataclass(frozen=True)

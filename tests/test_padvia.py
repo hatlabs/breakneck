@@ -126,9 +126,10 @@ def with_plan_applied(snap, plan):
         for i, u in enumerate(plan.units)
     ]
     tracks = [
-        track(u.net, u.stub.start, u.stub.end, u.stub.layer, u.stub.width, f"stub{i}")
+        track(u.net, start, end, u.stub.layer, u.stub.width, f"stub{i}.{j}")
         for i, u in enumerate(plan.units)
         if u.stub is not None
+        for j, (start, end) in enumerate(u.stub.legs)
     ]
     return snapshot(
         pads=snap.pads,
@@ -169,8 +170,8 @@ def test_0402_gnd_pad_gets_via_away_from_footprint_centre():
     assert u.position[1] == pytest.approx(10.0, abs=1e-3)
     assert u.stub is not None
     assert u.stub.layer == "F.Cu"
-    assert u.stub.start == pytest.approx((9.52, 10.0))
-    assert u.stub.end == u.position
+    assert u.stub.path[0] == pytest.approx((9.52, 10.0))
+    assert u.stub.path[-1] == u.position
     assert not plan.unfixable
 
 
