@@ -404,7 +404,6 @@ dependencies = [
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "shapely" },
-    { name = "svgpathtools" },
 ]
 
 [package.dev-dependencies]
@@ -423,7 +422,6 @@ requires-dist = [
     { name = "scikit-image", specifier = ">=0.25" },
     { name = "scipy", specifier = ">=1.14" },
     { name = "shapely", specifier = ">=2.0.7" },
-    { name = "svgpathtools", specifier = ">=1.6.1" },
 ]
 
 [package.metadata.requires-dev]
@@ -1429,30 +1427,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/28/e3/55dcc2cfbc3ca9c29519eb6884dd1415ecb53b0e934862d3559ddcb7e20b/stack_data-0.6.3.tar.gz", hash = "sha256:836a778de4fec4dcd1dcd89ed8abff8a221f58308462e1c4aa2a3cf30148f0b9", size = 44707, upload-time = "2023-09-30T13:58:05.479Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f1/7b/ce1eafaf1a76852e2ec9b22edecf1daa58175c090266e9f6c64afcd81d91/stack_data-0.6.3-py3-none-any.whl", hash = "sha256:d5558e0c25a4cb0853cddad3d77da9891a08cb85dd9f9f91b9f8cd66e511e695", size = 24521, upload-time = "2023-09-30T13:58:03.53Z" },
-]
-
-[[package]]
-name = "svgpathtools"
-version = "1.6.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "svgwrite" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ac/cc/4eefc59e5fef22fef58cc3a38c56930432fbfa79e6865e8382c5ed1ccc9a/svgpathtools-1.6.1.tar.gz", hash = "sha256:7054e6de1953e295bf565d535d585695453b09f8db4a2f7c4853348732097a3e", size = 2133040, upload-time = "2023-05-20T18:36:00.204Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9a/33/2777b992cff0b4240bbebe96433a37a6382e046d3471fcd14e40e1905ab7/svgpathtools-1.6.1-py2.py3-none-any.whl", hash = "sha256:39967f9a817b8a12cc6dd1646fc162d522fca6c3fd5f8c94913c15ee4cb3a906", size = 67442, upload-time = "2023-05-20T18:35:58.409Z" },
-]
-
-[[package]]
-name = "svgwrite"
-version = "1.4.3"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/16/c1/263d4e93b543390d86d8eb4fc23d9ce8a8d6efd146f9427364109004fa9b/svgwrite-1.4.3.zip", hash = "sha256:a8fbdfd4443302a6619a7f76bc937fc683daf2628d9b737c891ec08b8ce524c3", size = 189516, upload-time = "2022-07-14T14:05:26.107Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/84/15/640e399579024a6875918839454025bb1d5f850bb70d96a11eabb644d11c/svgwrite-1.4.3-py3-none-any.whl", hash = "sha256:bb6b2b5450f1edbfa597d924f9ac2dd099e625562e492021d7dd614f65f8a22d", size = 67122, upload-time = "2022-07-14T14:05:24.459Z" },
 ]
 
 [[package]]
