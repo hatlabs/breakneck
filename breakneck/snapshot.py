@@ -1,8 +1,7 @@
 """KiCad-independent copper geometry snapshot for the via planners.
 
 Coordinates are KiCad-native millimetres with y pointing down, the same frame
-as kicad-cli DRC reports and board files. This deliberately differs from the
-y-flipped helpers in `breakneck.conversions`.
+as kicad-cli DRC reports and board files.
 """
 
 from __future__ import annotations

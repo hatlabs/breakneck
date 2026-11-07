@@ -1,12 +1,11 @@
-# Breakneck: Via Stitching and Manual Neckdown for KiCad Layouts
+# Breakneck: Via Stitching for KiCad Layouts
 
 ## Introduction
 
-Breakneck works on the board open in KiCad's PCB editor, through the KiCad IPC API. It has three jobs:
+Breakneck works on the board open in KiCad's PCB editor, through the KiCad IPC API. It has two jobs:
 
 - **Via placement.** `returnvia`, `padvia` and `pourstitch` place ground return vias, pad stitching vias and pour stitching vias. Every run is checked with KiCad's own DRC before anything is committed, and lands as one undoable step.
 - **Heatmaps.** `returnvia` and `pourstitch` show return distance and pour coverage as heatmaps, rendered to a file or placed on the board, for checking a layout and placing vias by hand.
-- **Manual neckdown.** `cut` splits tracks at footprint courtyards so custom rules can neck them down.
 
 ### Return vias
 
@@ -62,23 +61,6 @@ Ground pours are stitched densely, so that the ground layers act as one referenc
 Ground plane coverage on In1.Cu, following the `pourstitch --power` and `returnvia` runs above. Pink copper is more than 3 mm from a stitching via. The pink left after the run, here next to the through-hole pads, is copper where no via fits within 3 mm through the copper; the run logs its total area but doesn't mark it.
 
 `pourstitch` rasterises the pours at 0.1 mm, places vias on a square lattice of pitch D·√2, then fills the remaining gaps one at a time, starting with the point farthest from any via. Narrow spots get a smaller fallback via. `--render` and `--overlay` show the result as heatmaps (see below).
-
-### Manual Neckdown
-
-**NB:** [This `kicad-python` bug](https://gitlab.com/kicad/code/kicad-python/-/issues/18) prevents manual neckdown from being properly used at the moment.
-
-Neckdown, or its inverse, fanout, refers to narrowing down of PCB tracks and their clearances when routing tracks to
-fine-pitch components such as BGAs or QFNs. KiCad does not provide a built-in feature to automatically neckdown tracks,
-and while the KiCad Custom Rules are powerful, they do not support neckdowns. It is possible to define rules for
-tracks intersecting footprint courtyards, but the rule applies to the entire length of the track segment, not just the
-part that intersects the courtyard.
-
-Breakneck is a Python script that communicates with KiCad and cuts tracks at a specified distance from the intersection with a footprint courtyard.
-After these track cuts, custom rules apply to the expected track segments. The layout isn't otherwise modified.
-Automatic re-healing of broken tracks is prevented by nudging the track widths by one nanometer, making adjacent
-tracks different widths.
-
-Breakneck's `cut` has basic support for filtering the affected tracks and components by layer, netclass or selection.
 
 ## Installation
 
@@ -188,8 +170,5 @@ breakneck pourstitch --check --overlay
 
 ## Limitations
 
-- Component classes are not supported due to API limitations.
-- Grouped tracks and footprints are ignored due to API limitations. It is possible to enter a group and
-  run `breakneck --selection` to process the group members.
 - Placed vias can't be grouped, because KiCad 10 refuses to create groups through the API.
 - The planners use fixed clearances (0.3 mm to other-net copper; a pad's clearance override plus 0.1 mm where it has one) and don't evaluate custom design rules. The DRC check is what enforces those.

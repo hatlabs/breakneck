@@ -1,4 +1,5 @@
 import argparse
+import re
 import subprocess
 import sys
 
@@ -64,6 +65,21 @@ def test_padvia_failure_exits_cleanly(monkeypatch, error):
 def parsed(monkeypatch, argv):
     monkeypatch.setattr(sys, "argv", ["breakneck", *argv])
     return cli.parse_args()
+
+
+def test_cli_offers_the_via_commands_and_clear(monkeypatch, capsys):
+    with pytest.raises(SystemExit):
+        parsed(monkeypatch, ["--help"])
+
+    choices = re.findall(r"\{([a-z,]+)\}", capsys.readouterr().out)[0]
+    assert set(choices.split(",")) == {"returnvia", "pourstitch", "padvia", "clear"}
+
+
+def test_cut_is_not_a_command(monkeypatch):
+    with pytest.raises(SystemExit) as exit_info:
+        parsed(monkeypatch, ["cut"])
+
+    assert exit_info.value.code == 2
 
 
 @pytest.mark.parametrize("allow", [False, True])

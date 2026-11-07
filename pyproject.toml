@@ -2,7 +2,7 @@
 name = "breakneck"
 version = "0.4.0"
 authors = [{ name = "Matti Airas", email = "matti.airas@hatlabs.fi" }]
-description = "DRC-checked placement of return, pad and pour stitching vias, return and coverage heatmaps and manual neckdowns for KiCad"
+description = "DRC-checked placement of return, pad and pour stitching vias for KiCad, with return and coverage heatmaps"
 readme = "README.md"
 requires-python = ">=3.11"
 classifiers = [
@@ -14,7 +14,7 @@ classifiers = [
 ]
 license = "MIT"
 license-files = ["LICENSE"]
-keywords = ["KiCad", "EDA", "PCB", "stitching", "neckdown", "breakneck"]
+keywords = ["KiCad", "EDA", "PCB", "stitching", "breakneck"]
 
 dependencies = [
     "kicad-python >= 0.8.0",
