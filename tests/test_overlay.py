@@ -10,11 +10,11 @@ from kipy.proto.board.board_types_pb2 import BoardLayer as BL
 from PIL import Image
 from shapely.geometry import box
 
-from breakneck import cli, overlay, pourstitch_command, render, returnvia_command
-from breakneck.commit import CreateItemsError
-from breakneck.plan import Plan, PlannedUnit, UnfixableSpot
-from breakneck.raster import CoverageMap, Grid
-from breakneck.snapshot import NM_PER_MM, Snapshot, Via, ViaSize
+from kistitch import cli, overlay, pourstitch_command, render, returnvia_command
+from kistitch.commit import CreateItemsError
+from kistitch.plan import Plan, PlannedUnit, UnfixableSpot
+from kistitch.raster import CoverageMap, Grid
+from kistitch.snapshot import NM_PER_MM, Snapshot, Via, ViaSize
 
 D = 2.5
 STYLE = pourstitch_command.STYLE
@@ -587,7 +587,7 @@ class Existing:
         (Existing(BL.BL_Cmts_User), False),
     ],
 )
-def test_only_images_at_the_overlay_placement_are_breakneck_overlays(existing, ours):
+def test_only_images_at_the_overlay_placement_are_our_overlays(existing, ours):
     assert overlay.is_overlay(existing, PLACEMENT, ("User.1", "User.2")) is ours  # type: ignore[arg-type]
 
 
@@ -598,20 +598,24 @@ def png(path: Path, metadata: dict[str, str]) -> bytes:
     return path.read_bytes()
 
 
-def test_written_overlays_carry_the_breakneck_tag(tmp_path: Path):
+def test_written_overlays_carry_the_kistitch_tag(tmp_path: Path):
     maps = [coverage("GND", "F.Cu", np.zeros((3, 3)))]
 
     data = render.write_overlays(tmp_path, grid_of(maps), maps, {}, D, STYLE)[
         "F.Cu"
     ].read_bytes()
 
-    key, value = overlay.OVERLAY_TAG
-    assert overlay.png_text(data)[key] == value
+    assert overlay.png_text(data)["kistitch"] == "pourstitch-overlay"
 
 
-def test_tagged_image_anywhere_on_an_overlay_layer_is_breakneck_s(tmp_path: Path):
+# Overlays placed before the rename from breakneck carry its name.
+BREAKNECK_TAG = ("breakneck", "pourstitch-overlay")
+
+
+@pytest.mark.parametrize("tag", [overlay.OVERLAY_TAG, BREAKNECK_TAG])
+def test_tagged_image_anywhere_on_an_overlay_layer_is_ours(tmp_path: Path, tag):
     # The outline changed since it was placed: the placement no longer matches.
-    data = png(tmp_path / "t.png", dict([overlay.OVERLAY_TAG]))
+    data = png(tmp_path / "t.png", dict([tag]))
     moved = Existing(BL.BL_User_1, (30, 30), 2.0, data)
     elsewhere = Existing(BL.BL_Cmts_User, data=data)
 
@@ -715,7 +719,7 @@ def test_refused_overlay_falls_back_to_manual_placement(tmp_path, monkeypatch):
     assert board.calls == ["begin_commit", "drop_commit"]
 
 
-def test_placing_no_images_removes_breakneck_overlays_only(monkeypatch):
+def test_placing_no_images_removes_our_overlays_only(monkeypatch):
     created = []
     monkeypatch.setattr(
         overlay, "create_checked", lambda board, items: created.extend(items)
@@ -817,12 +821,16 @@ def rectangle_outline(x0, y0, x1, y1):
     return [segment(BL.BL_Edge_Cuts, a, b) for a, b in pairwise(corners)]
 
 
-def test_clear_removes_breakneck_overlays_and_keeps_other_images(monkeypatch):
+def test_clear_removes_our_overlays_and_keeps_other_images(tmp_path, monkeypatch):
     bounds = (0.0, 0.0, 30.0, 20.0)
     placement = overlay.board_placement(bounds)
     ours = Existing(BL.BL_User_2, placement.centre, placement.scale)
+    # Placed by breakneck before the outline changed.
+    moved_breakneck = Existing(
+        BL.BL_User_3, (40, 40), 2.0, png(tmp_path / "b.png", dict([BREAKNECK_TAG]))
+    )
     users_own = Existing(BL.BL_User_1, (5, 5), 1.0)
-    board = ClearBoard(rectangle_outline(*bounds), [ours, users_own])
+    board = ClearBoard(rectangle_outline(*bounds), [ours, moved_breakneck, users_own])
     monkeypatch.setattr(
         cli.kipy, "KiCad", lambda: type("K", (), {"get_board": lambda self: board})()
     )
@@ -836,5 +844,6 @@ def test_clear_removes_breakneck_overlays_and_keeps_other_images(monkeypatch):
     cli.execute_clear(args)
 
     assert ours in board.removed
+    assert moved_breakneck in board.removed
     assert users_own not in board.removed
     assert any(getattr(s, "layer", None) == BL.BL_Eco2_User for s in board.removed)

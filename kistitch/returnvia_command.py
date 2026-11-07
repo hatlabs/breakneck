@@ -14,33 +14,33 @@ from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
-from breakneck import overlay, render
-from breakneck.commit import Marker, MarkerKind
-from breakneck.placement import (
+from kistitch import overlay, render
+from kistitch.commit import Marker, MarkerKind
+from kistitch.placement import (
     RunSettings,
     check_outline,
     measure_only,
     run_placement,
 )
-from breakneck.plan import QUANTISATION, PlannedUnit
-from breakneck.raster import BoolMap, CoverageMap, Grid
-from breakneck.returnpath import (
+from kistitch.plan import QUANTISATION, PlannedUnit
+from kistitch.raster import BoolMap, CoverageMap, Grid
+from kistitch.returnpath import (
     Outcome,
     PlaneReturn,
     ReturnFields,
 )
-from breakneck.returnvia import (
+from kistitch.returnvia import (
     ReferencePlane,
     ReturnViaOptions,
     ViaReferences,
     reference_outlines,
     via_references,
 )
-from breakneck.returnvia_planner import ReturnViaPlanner
-from breakneck.snapshot import PadKind, Snapshot, Via
+from kistitch.returnvia_planner import ReturnViaPlanner
+from kistitch.snapshot import PadKind, Snapshot, Via
 
 COMMAND = "returnvia"
-OVERLAY_COMMIT = "breakneck returnvia overlay"
+OVERLAY_COMMIT = "kistitch returnvia overlay"
 # The colour scale runs to this multiple of the served threshold, --distance
 # plus the quantisation margin, and saturates beyond.
 SCALE = 3.0

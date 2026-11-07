@@ -2,8 +2,8 @@
 
 from collections.abc import Iterable
 
-from breakneck.returnvia import filled_layers, tied_layers
-from breakneck.snapshot import Snapshot, Via
+from kistitch.returnvia import filled_layers, tied_layers
+from kistitch.snapshot import Snapshot, Via
 
 
 def stitching_vias(snapshot: Snapshot, nets: Iterable[str] | None = None) -> list[Via]:

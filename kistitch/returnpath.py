@@ -19,8 +19,8 @@ from scipy import ndimage
 from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
 
-from breakneck.plan import QUANTISATION, THERMAL_REACH
-from breakneck.raster import (
+from kistitch.plan import QUANTISATION, THERMAL_REACH
+from kistitch.raster import (
     BoolMap,
     FloatMap,
     Grid,
@@ -29,14 +29,14 @@ from breakneck.raster import (
     geodesic_in,
     touch,
 )
-from breakneck.returnvia import (
+from kistitch.returnvia import (
     OUTSIDE_GROUND,
     ReferencePlane,
     ViaReferences,
     resolve_ground_nets,
     via_references,
 )
-from breakneck.snapshot import NoBoardOutlineError, PadKind, Point2, Snapshot
+from kistitch.snapshot import NoBoardOutlineError, PadKind, Point2, Snapshot
 
 # The void floods through edge-sharing pixels only, so it never leaks through
 # two fill pixels that meet at a corner.

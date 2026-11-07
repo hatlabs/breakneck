@@ -1,20 +1,21 @@
-# Breakneck: Via Stitching and Manual Neckdown for KiCad Layouts
+# Kistitch: Via Stitching for KiCad Layouts
+
+Formerly [breakneck](https://pypi.org/project/breakneck/). To switch an installed tool, run `uv tool uninstall breakneck && uv tool install kistitch`. The neckdown command `cut` is gone; breakneck 0.4.x still has it.
 
 ## Introduction
 
-Breakneck works on the board open in KiCad's PCB editor, through the KiCad IPC API. It has three jobs:
+Kistitch works on the board open in KiCad's PCB editor, through the KiCad IPC API. It has two jobs:
 
 - **Via placement.** `returnvia`, `padvia` and `pourstitch` place ground return vias, pad stitching vias and pour stitching vias. Every run is checked with KiCad's own DRC before anything is committed, and lands as one undoable step.
 - **Heatmaps.** `returnvia` and `pourstitch` show return distance and pour coverage as heatmaps, rendered to a file or placed on the board, for checking a layout and placing vias by hand.
-- **Manual neckdown.** `cut` splits tracks at footprint courtyards so custom rules can neck them down.
 
 ### Return vias
 
 A signal changing layers through a via also changes its reference plane, and its return current needs a ground via nearby to follow it. `returnvia` places a ground via within `--distance` (default 1.5 mm) of every via on a non-ground net that has none.
 
-| Before: `breakneck returnvia --check --overlay` | After: `breakneck returnvia --overlay` |
+| Before: `kistitch returnvia --check --overlay` | After: `kistitch returnvia --overlay` |
 |---|---|
-| ![Return distance heatmap on F.Cu before placing return vias, with many rings around unserved vias](https://raw.githubusercontent.com/hatlabs/breakneck/main/docs/images/returnvia-before.png) | ![Return distance heatmap on F.Cu after placing return vias, with some rings left](https://raw.githubusercontent.com/hatlabs/breakneck/main/docs/images/returnvia-after.png) |
+| ![Return distance heatmap on F.Cu before placing return vias, with many rings around unserved vias](https://raw.githubusercontent.com/hatlabs/kistitch/main/docs/images/returnvia-before.png) | ![Return distance heatmap on F.Cu after placing return vias, with some rings left](https://raw.githubusercontent.com/hatlabs/kistitch/main/docs/images/returnvia-after.png) |
 
 The return distance heatmap on F.Cu of a four-layer board, before and after placing return vias, following a `pourstitch --power` run. Each pink ring marks an unserved via end: one with no ground return within 1.5 mm through its reference plane. The rings left after the run mark the vias the planner couldn't serve; fix those by hand.
 
@@ -47,76 +48,59 @@ With Manhattan routing, outer-layer pours break up into narrow fingers. A regula
 
 Power pours are stitched sparsely. They need vias to join their layers, to carry their DC current and to reach their extremities, and a 10 mm distance gives that. More power vias cost more than they give: each one cuts an antipad into the ground planes it passes through, and each one is a via on a non-ground net that needs its own ground return. Where a power pour carries high current, check that it has enough vias for it and add more by hand.
 
-| Before: `breakneck pourstitch --power --check --overlay` | After: `breakneck pourstitch --power --overlay` |
+| Before: `kistitch pourstitch --power --check --overlay` | After: `kistitch pourstitch --power --overlay` |
 |---|---|
-| ![Power pour coverage on F.Cu before stitching, with pink areas beyond 10 mm](https://raw.githubusercontent.com/hatlabs/breakneck/main/docs/images/power-before.png) | ![Power pour coverage on F.Cu after placing stitching vias](https://raw.githubusercontent.com/hatlabs/breakneck/main/docs/images/power-after.png) |
+| ![Power pour coverage on F.Cu before stitching, with pink areas beyond 10 mm](https://raw.githubusercontent.com/hatlabs/kistitch/main/docs/images/power-before.png) | ![Power pour coverage on F.Cu after placing stitching vias](https://raw.githubusercontent.com/hatlabs/kistitch/main/docs/images/power-after.png) |
 
 Power pour coverage on F.Cu. Pink copper is more than 10 mm from a stitching via, measured through the copper.
 
 Ground pours are stitched densely, so that the ground layers act as one reference and no ground finger is left to act as an antenna. At 3 mm the lattice pitch is about 4.2 mm, which is λ/20 at about 1.7 GHz in FR-4. That is not dense enough for RF: around an RF section, such as the surroundings of a 2.4 GHz module and its antenna feed, add ground vias by hand.
 
-| Before: `breakneck pourstitch --check --overlay` | After: `breakneck pourstitch --overlay` |
+| Before: `kistitch pourstitch --check --overlay` | After: `kistitch pourstitch --overlay` |
 |---|---|
-| ![Ground plane coverage on In1.Cu before stitching, with pink gaps between vias](https://raw.githubusercontent.com/hatlabs/breakneck/main/docs/images/ground-before.png) | ![Ground plane coverage on In1.Cu after placing stitching vias](https://raw.githubusercontent.com/hatlabs/breakneck/main/docs/images/ground-after.png) |
+| ![Ground plane coverage on In1.Cu before stitching, with pink gaps between vias](https://raw.githubusercontent.com/hatlabs/kistitch/main/docs/images/ground-before.png) | ![Ground plane coverage on In1.Cu after placing stitching vias](https://raw.githubusercontent.com/hatlabs/kistitch/main/docs/images/ground-after.png) |
 
 Ground plane coverage on In1.Cu, following the `pourstitch --power` and `returnvia` runs above. Pink copper is more than 3 mm from a stitching via. The pink left after the run, here next to the through-hole pads, is copper where no via fits within 3 mm through the copper; the run logs its total area but doesn't mark it.
 
 `pourstitch` rasterises the pours at 0.1 mm, places vias on a square lattice of pitch D·√2, then fills the remaining gaps one at a time, starting with the point farthest from any via. Narrow spots get a smaller fallback via. `--render` and `--overlay` show the result as heatmaps (see below).
 
-### Manual Neckdown
-
-**NB:** [This `kicad-python` bug](https://gitlab.com/kicad/code/kicad-python/-/issues/18) prevents manual neckdown from being properly used at the moment.
-
-Neckdown, or its inverse, fanout, refers to narrowing down of PCB tracks and their clearances when routing tracks to
-fine-pitch components such as BGAs or QFNs. KiCad does not provide a built-in feature to automatically neckdown tracks,
-and while the KiCad Custom Rules are powerful, they do not support neckdowns. It is possible to define rules for
-tracks intersecting footprint courtyards, but the rule applies to the entire length of the track segment, not just the
-part that intersects the courtyard.
-
-Breakneck is a Python script that communicates with KiCad and cuts tracks at a specified distance from the intersection with a footprint courtyard.
-After these track cuts, custom rules apply to the expected track segments. The layout isn't otherwise modified.
-Automatic re-healing of broken tracks is prevented by nudging the track widths by one nanometer, making adjacent
-tracks different widths.
-
-Breakneck's `cut` has basic support for filtering the affected tracks and components by layer, netclass or selection.
-
 ## Installation
 
 As a prerequisite, [install uv](https://docs.astral.sh/uv/getting-started/installation/).
 
-To run breakneck without actually installing it:
+To run kistitch without actually installing it:
 
 ```
-uvx breakneck <command> [options...]
+uvx kistitch <command> [options...]
 ```
 
-To install breakneck as a tool:
+To install kistitch as a tool:
 
 ```
-uv tool install breakneck
+uv tool install kistitch
 ```
 
-Breakneck needs KiCad 10 and kicad-python 0.8 or later.
+Kistitch needs KiCad 10 and kicad-python 0.8 or later.
 
 ## KiCad Configuration
 
 The new KiCad IPC API lets you connect to an existing KiCad instance using Inter-Process Communication (IPC). The API is not enabled by default. To enable it, open the KiCad preferences and navigate to "Plugins" and check the "Enable KiCad API" checkbox.
 
-Only one KiCad instance can serve the API at a time. Close other KiCad windows if breakneck can't find the open board.
+Only one KiCad instance can serve the API at a time. Close other KiCad windows if kistitch can't find the open board.
 
 ## Usage
 
-**NOTE:** If you are running breakneck with `uvx`, prepend all breakneck commands below with `uvx`.
+**NOTE:** If you are running kistitch with `uvx`, prepend all kistitch commands below with `uvx`.
 
-Run `breakneck -h`, or `breakneck <command> -h`, to see the available options.
+Run `kistitch -h`, or `kistitch <command> -h`, to see the available options.
 
 ### Placing vias
 
 ```bash
-breakneck padvia
-breakneck pourstitch --power
-breakneck returnvia
-breakneck pourstitch --overlay
+kistitch padvia
+kistitch pourstitch --power
+kistitch returnvia
+kistitch pourstitch --overlay
 ```
 
 Each placement run:
@@ -132,9 +116,9 @@ Spots that need attention get markers on User.Eco2:
 - a + at a forced via (`returnvia --force`);
 - a square at a new DRC violation that couldn't be pinned on a single via.
 
-Other nets' pours are not obstacles, so a single via can cut a narrow neck of another net's pour. DRC reports that as unconnected items or isolated copper and names the pour's pads or zones, not the via. breakneck counts these violations per net, in DRC of the board as it is and with the planned vias added. When a net's count goes up, the run commits nothing and exits with an error naming the net and listing the violations. An existing violation that DRC reports at different items after the refill leaves the count unchanged, so it gets a marker but doesn't stop the run. `--allow-splits` (on `returnvia`, `padvia` and `pourstitch`) commits anyway, with a square marker at each violation for fixing by hand. A dry run lists them without failing.
+Other nets' pours are not obstacles, so a single via can cut a narrow neck of another net's pour. DRC reports that as unconnected items or isolated copper and names the pour's pads or zones, not the via. Kistitch counts these violations per net, in DRC of the board as it is and with the planned vias added. When a net's count goes up, the run commits nothing and exits with an error naming the net and listing the violations. An existing violation that DRC reports at different items after the refill leaves the count unchanged, so it gets a marker but doesn't stop the run. `--allow-splits` (on `returnvia`, `padvia` and `pourstitch`) commits anyway, with a square marker at each violation for fixing by hand. A dry run lists them without failing.
 
-`pourstitch` doesn't mark uncovered spots; its heatmap shows them as areas. Each placing `returnvia`, `padvia` or `pourstitch` run that doesn't stop with an error replaces the previous markers, whichever command made them: it removes every shape on User.Eco2, hand-drawn ones included, in the same undo step, also when it places nothing. So after `padvia` then `pourstitch`, only `pourstitch`'s markers remain. A `--check --overlay` run replaces them too, in the undo step that places the overlay images: `returnvia` draws a circle at each via with an unserved end, matching the heatmap's rings, and `pourstitch` only removes the old markers. A `--check --overlay` run with nothing to show, such as a `returnvia` check with every via end served, still removes the old markers. A `--check` run without `--overlay`, or one that can't place overlays, as in a dry run with the overlay layers disabled, leaves the markers alone, as does a dry run of a placing command. `breakneck clear` removes the markers without a run.
+`pourstitch` doesn't mark uncovered spots; its heatmap shows them as areas. Each placing `returnvia`, `padvia` or `pourstitch` run that doesn't stop with an error replaces the previous markers, whichever command made them: it removes every shape on User.Eco2, hand-drawn ones included, in the same undo step, also when it places nothing. So after `padvia` then `pourstitch`, only `pourstitch`'s markers remain. A `--check --overlay` run replaces them too, in the undo step that places the overlay images: `returnvia` draws a circle at each via with an unserved end, matching the heatmap's rings, and `pourstitch` only removes the old markers. A `--check --overlay` run with nothing to show, such as a `returnvia` check with every via end served, still removes the old markers. A `--check` run without `--overlay`, or one that can't place overlays, as in a dry run with the overlay layers disabled, leaves the markers alone, as does a dry run of a placing command. `kistitch clear` removes the markers without a run.
 
 `returnvia --force` adds a second pass: every via still without a return gets one at the spot with the most clearance, never overlapping other-net copper. These vias may violate clearance. They survive the DRC check despite that, and get a marker so you can fix them by hand. A forced via is a placeholder that may lie outside the ground fill, so it serves nothing: the run's log and heatmaps still count its via as unserved. Other vias of the same ground net within `--distance` of it in a straight line get no forced via of their own; they are reported unfixable with "relies on forced via at (x, y)" and get a circle. After moving it, refill the zones and run `returnvia --check` to confirm. Via ends outside every ground zone, or with no ground fill near the via, are never forced.
 
@@ -155,18 +139,18 @@ Notes:
 - **Other nets' pours** are not obstacles. They refill around the new vias, as in any KiCad layout.
 - **Project rules are read from disk.** DRC uses the saved `.kicad_pro` and `.kicad_dru`, so save rule and netclass changes before running. The board itself is read from the editor, unsaved changes included.
 - **kicad-cli** is taken from `--kicad-cli`, then from the running KiCad, then from `PATH`, then from the standard install locations.
-- **Set the zones' "Remove islands" to Never** before running `pourstitch` or `returnvia`. KiCad then keeps unconnected islands in the fill, so breakneck can place vias in them, and a spot over the main pour on one layer with only an island on the other passes the two-layer rule instead of dropping out, and stops showing grey in the `pourstitch` heatmap. Islands kept this way appear as isolated copper in DRC until they are stitched. Stitching only lowers that count, so the split check doesn't block the run.
-- **Runs add vias.** Every check counts the vias already on the board, so repeating a run adds nothing new. To remove a run's vias, undo it, or run `breakneck clear --vias` (below) to remove every stitching via not tied to a track or pad. KiCad 10 doesn't allow creating groups through the API, so a run's vias can't be grouped for selecting later.
+- **Set the zones' "Remove islands" to Never** before running `pourstitch` or `returnvia`. KiCad then keeps unconnected islands in the fill, so kistitch can place vias in them, and a spot over the main pour on one layer with only an island on the other passes the two-layer rule instead of dropping out, and stops showing grey in the `pourstitch` heatmap. Islands kept this way appear as isolated copper in DRC until they are stitched. Stitching only lowers that count, so the split check doesn't block the run.
+- **Runs add vias.** Every check counts the vias already on the board, so repeating a run adds nothing new. To remove a run's vias, undo it, or run `kistitch clear --vias` (below) to remove every stitching via not tied to a track or pad. KiCad 10 doesn't allow creating groups through the API, so a run's vias can't be grouped for selecting later.
 
 ### Clearing stitching vias
 
-`breakneck clear --vias` removes stitching vias along with the markers and overlays, so `pourstitch` and `returnvia` can place a fresh set after layout changes. A via goes when it touches a fill of its own net on at least one layer and no track or pad of its net touches it. Vias in pads, fanout vias at the end of a track and locked vias stay. `--nets NET [NET ...]` limits the removal to those nets; by default every net with a zone is cleared. The removal is one undo step, followed by a zone refill. With `--dry-run` it logs how many vias per net would go and removes nothing.
+`kistitch clear --vias` removes stitching vias along with the markers and overlays, so `pourstitch` and `returnvia` can place a fresh set after layout changes. A via goes when it touches a fill of its own net on at least one layer and no track or pad of its net touches it. Vias in pads, fanout vias at the end of a track and locked vias stay. `--nets NET [NET ...]` limits the removal to those nets; by default every net with a zone is cleared. The removal is one undo step, followed by a zone refill. With `--dry-run` it logs how many vias per net would go and removes nothing.
 
 **This removes every via touching a pour of its own net that no track or pad ties down, including vias placed by hand.** That includes fanout vias tied to a pad only through a pour, and vias that are the only link between two pours of the same net. To keep such a via, connect it with a short track or lock it. To restore a board after clearing, run `clear --vias`, then `padvia` (it re-adds a via with a stub track for each SMD pad, and the stubs keep those vias through later clears), then the three stitching steps above: `pourstitch --power`, `returnvia` and `pourstitch`.
 
 ### Dry runs
 
-`breakneck --dry-run <command>` plans, runs DRC, logs what it would place and writes `--render` output, but commits no vias or markers. The zone refill before planning still runs, and `--overlay` still places its images, together with the markers of a `--check` run. The heatmaps include the planned vias: for `returnvia` they count as returns, except forced ones, so a dry run shows which via ends the run would leave unserved.
+`kistitch --dry-run <command>` plans, runs DRC, logs what it would place and writes `--render` output, but commits no vias or markers. The zone refill before planning still runs, and `--overlay` still places its images, together with the markers of a `--check` run. The heatmaps include the planned vias: for `returnvia` they count as returns, except forced ones, so a dry run shows which via ends the run would leave unserved.
 
 ### Heatmaps
 
@@ -176,20 +160,17 @@ Notes:
 
 `returnvia` logs the number of exempt vias, which connect on fewer than two layers, and how many vias and via-plane returns are unserved. Set `LOGURU_LEVEL=DEBUG` to list each unserved via end with its distance or the reason it can't be served.
 
-`pourstitch --overlay` and `returnvia --overlay` place one transparent image per copper layer on the board as a reference image, scaled and positioned to line up with the copper. The images go on User.1–User.4, one per copper layer in stack order, or on the layers given with `--overlay-layers`. Those layers must be enabled in Board Setup → Board Editor Layers. Each image carries its colourbar and label in a strip below the board outline. The board stores the images itself; the PNGs are written to a temporary directory and removed once placed. When they can't be placed, as in a dry run with the layers disabled, they stay there and the log lists their paths and placements. Toggle a layer's visibility to show or hide its heatmap, and remove them with `breakneck clear`. Both `clear` and a new `--overlay` replace only breakneck's own overlays, recognised by a `breakneck` text chunk in the PNG, also after the board outline has changed. Other reference images on those layers stay. Overlays placed by earlier breakneck versions carry no tag and are recognised only at their position and scale for the current board outline; after an outline change, delete those by hand.
+`pourstitch --overlay` and `returnvia --overlay` place one transparent image per copper layer on the board as a reference image, scaled and positioned to line up with the copper. The images go on User.1–User.4, one per copper layer in stack order, or on the layers given with `--overlay-layers`. Those layers must be enabled in Board Setup → Board Editor Layers. Each image carries its colourbar and label in a strip below the board outline. The board stores the images itself; the PNGs are written to a temporary directory and removed once placed. When they can't be placed, as in a dry run with the layers disabled, they stay there and the log lists their paths and placements. Toggle a layer's visibility to show or hide its heatmap, and remove them with `kistitch clear`. Both `clear` and a new `--overlay` replace only kistitch's own overlays, recognised by a `kistitch` text chunk in the PNG, or the `breakneck` chunk of overlays placed before the rename, also after the board outline has changed. Other reference images on those layers stay.
 
 `pourstitch --check` and `returnvia --check` measure the existing vias only: no planning, no DRC and no vias. Combine them with `--render` or `--overlay` to see the current coverage. Every `--overlay` run commits its images and so adds an undo step; with `--check`, that step also replaces the markers. For repeated checks while placing vias by hand, use `--check --render` and keep the PNG open in an image viewer that reloads it; use `--overlay` for a one-off look on the board:
 
 ```bash
-breakneck returnvia --check --render returnvia.png
-breakneck pourstitch --power --check --render power.png
-breakneck pourstitch --check --overlay
+kistitch returnvia --check --render returnvia.png
+kistitch pourstitch --power --check --render power.png
+kistitch pourstitch --check --overlay
 ```
 
 ## Limitations
 
-- Component classes are not supported due to API limitations.
-- Grouped tracks and footprints are ignored due to API limitations. It is possible to enter a group and
-  run `breakneck --selection` to process the group members.
 - Placed vias can't be grouped, because KiCad 10 refuses to create groups through the API.
 - The planners use fixed clearances (0.3 mm to other-net copper; a pad's clearance override plus 0.1 mm where it has one) and don't evaluate custom design rules. The DRC check is what enforces those.

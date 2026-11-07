@@ -12,16 +12,16 @@ import kipy
 import kipy.board
 from loguru import logger
 
-from breakneck import drc
-from breakneck.commit import (
+from kistitch import drc
+from kistitch.commit import (
     Marker,
     MarkerKind,
     commit_units,
     marker_shapes,
     refill_tolerant,
 )
-from breakneck.plan import Plan, Planner
-from breakneck.snapshot import (
+from kistitch.plan import Plan, Planner
+from kistitch.snapshot import (
     NoBoardOutlineError,
     Snapshot,
     edge_paths_closed,
@@ -152,7 +152,7 @@ def run_placement(
     snapshot = Snapshot.from_board(board)
 
     verified_text = board.get_as_string()
-    with tempfile.TemporaryDirectory(prefix="breakneck-drc-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="kistitch-drc-") as tmp:
         runner = drc.DrcRunner(kicad_cli, project, verified_text, Path(tmp))
         result = drc.prune(
             planner,

@@ -13,7 +13,7 @@ from loguru import logger
 from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
 
-from breakneck.snapshot import Point2, Snapshot, Via, ViaSize
+from kistitch.snapshot import Point2, Snapshot, Via, ViaSize
 
 DEFAULT_DISTANCE = 1.5
 FALLBACK_GROUND = "GND"

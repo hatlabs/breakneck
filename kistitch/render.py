@@ -23,9 +23,9 @@ from matplotlib.patches import Circle
 from matplotlib.transforms import Bbox
 from PIL import Image
 
-from breakneck.overlay import MM_PER_INCH, OVERLAY_PPI, OVERLAY_TAG
-from breakneck.raster import CoverageMap, Grid
-from breakneck.snapshot import Point2, Snapshot
+from kistitch.overlay import MM_PER_INCH, OVERLAY_PPI, OVERLAY_TAG
+from kistitch.raster import CoverageMap, Grid
+from kistitch.snapshot import Point2, Snapshot
 
 BACKGROUND = "#101010"
 OUTLINE_COLOUR = "#888888"

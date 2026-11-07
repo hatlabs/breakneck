@@ -5,11 +5,11 @@ from itertools import pairwise
 import pytest
 from shapely.geometry import LineString, Point, box
 
-from breakneck import padvia
-from breakneck.obstacles import Obstacles
-from breakneck.padvia import PadviaOptions, plan_padvia
-from breakneck.plan import FORBIDDEN_RADIUS, HOLE_TO_HOLE_GAP
-from breakneck.snapshot import (
+from kistitch import padvia
+from kistitch.obstacles import Obstacles
+from kistitch.padvia import PadviaOptions, plan_padvia
+from kistitch.plan import FORBIDDEN_RADIUS, HOLE_TO_HOLE_GAP
+from kistitch.snapshot import (
     NM_PER_MM,
     Footprint,
     Pad,

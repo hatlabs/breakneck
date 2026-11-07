@@ -14,8 +14,8 @@ from scipy import ndimage
 from shapely.geometry.base import BaseGeometry
 from skimage.graph import MCP_Geometric
 
-from breakneck.plan import POURSTITCH_PIXEL, raster_size
-from breakneck.snapshot import Point2
+from kistitch.plan import POURSTITCH_PIXEL, raster_size
+from kistitch.snapshot import Point2
 
 BoolMap = npt.NDArray[np.bool_]
 FloatMap = npt.NDArray[np.floating]

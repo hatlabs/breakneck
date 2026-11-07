@@ -14,7 +14,7 @@ from kipy.proto.common.types import project_settings_pb2
 from kipy.util.board_layer import canonical_name
 from shapely.geometry import Point, box
 
-from breakneck.snapshot import (
+from kistitch.snapshot import (
     DEFAULT_VIA_SIZE,
     NM_PER_MM,
     Snapshot,

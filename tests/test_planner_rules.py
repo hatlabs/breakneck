@@ -3,16 +3,16 @@
 import pytest
 from shapely.geometry import box
 
-from breakneck import padvia, returnvia_planner
-from breakneck.obstacles import Obstacles
-from breakneck.plan import (
+from kistitch import padvia, returnvia_planner
+from kistitch.obstacles import Obstacles
+from kistitch.plan import (
     HOLE_TO_HOLE_GAP,
     OTHER_NET_CLEARANCE,
     OVERRIDE_MARGIN,
     SAME_NET_PAD_GAP,
     pad_clearance,
 )
-from breakneck.snapshot import Pad, PadKind, Snapshot, Via, ViaSize, Zone
+from kistitch.snapshot import Pad, PadKind, Snapshot, Via, ViaSize, Zone
 
 LAYERS = ("F.Cu", "B.Cu")
 BOARD = box(0, 0, 30, 20)

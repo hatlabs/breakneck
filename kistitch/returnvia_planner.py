@@ -10,17 +10,17 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from breakneck.obstacles import Obstacles
-from breakneck.plan import OTHER_NET_CLEARANCE, Plan, PlannedUnit, UnfixableSpot
-from breakneck.returnpath import Outcome, ReturnFields, served_within
-from breakneck.returnvia import (
+from kistitch.obstacles import Obstacles
+from kistitch.plan import OTHER_NET_CLEARANCE, Plan, PlannedUnit, UnfixableSpot
+from kistitch.returnpath import Outcome, ReturnFields, served_within
+from kistitch.returnvia import (
     DISTANCE_EPSILON,
     ReferencePlane,
     ReturnViaOptions,
     resolve_ground_nets,
     via_references,
 )
-from breakneck.snapshot import Point2, Snapshot, Via, ViaSize
+from kistitch.snapshot import Point2, Snapshot, Via, ViaSize
 
 # Candidate rings around each unserved via.
 RING_STEP = 0.05

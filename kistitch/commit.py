@@ -28,8 +28,8 @@ from kipy.util.proto import pack_any
 from kipy.wrapper import Wrapper
 from loguru import logger
 
-from breakneck.plan import PlannedUnit
-from breakneck.snapshot import NM_PER_MM, Point2
+from kistitch.plan import PlannedUnit
+from kistitch.snapshot import NM_PER_MM, Point2
 
 MARKER_LAYER = BoardLayer.BL_Eco2_User
 MARKER_HALF_SIZE = 0.5
@@ -40,7 +40,7 @@ MARKER_MARGIN = 0.3
 MARKER_WIDTH = 0.1
 REFILL_TIMEOUT_S = 300.0
 REFILL_POLL_S = 1.0
-COMMIT_PREFIX = "breakneck"
+COMMIT_PREFIX = "kistitch"
 
 
 class MarkerKind(enum.Enum):

@@ -3,8 +3,8 @@ import math
 import pytest
 from shapely.geometry import LineString, Point, box
 
-from breakneck.obstacles import Obstacles
-from breakneck.plan import (
+from kistitch.obstacles import Obstacles
+from kistitch.plan import (
     EDGE_GAP,
     FORBIDDEN_RADIUS,
     HOLE_TO_HOLE_GAP,
@@ -14,7 +14,7 @@ from breakneck.plan import (
     PlannedUnit,
     Stub,
 )
-from breakneck.snapshot import Pad, PadKind, Snapshot, Track, Via, ViaSize, Zone
+from kistitch.snapshot import Pad, PadKind, Snapshot, Track, Via, ViaSize, Zone
 
 LAYERS = ("F.Cu", "In1.Cu", "In2.Cu", "B.Cu")
 BOARD = box(0, 0, 30, 20)

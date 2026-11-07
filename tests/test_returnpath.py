@@ -4,15 +4,15 @@ import pytest
 from shapely.geometry import LineString, Point, box
 from shapely.ops import unary_union
 
-from breakneck.plan import QUANTISATION
-from breakneck.returnpath import (
+from kistitch.plan import QUANTISATION
+from kistitch.returnpath import (
     NoBoardOutlineError,
     Outcome,
     PlaneReturn,
     measure_returns,
 )
-from breakneck.returnvia import ReferencePlane
-from breakneck.snapshot import Pad, PadKind, Snapshot, Track, Via, Zone
+from kistitch.returnvia import ReferencePlane
+from kistitch.snapshot import Pad, PadKind, Snapshot, Track, Via, Zone
 
 FOUR_LAYERS = ("F.Cu", "In1.Cu", "In2.Cu", "B.Cu")
 INNER = ("In1.Cu", "In2.Cu")

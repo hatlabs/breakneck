@@ -12,27 +12,27 @@ from scipy import ndimage
 from shapely.geometry import LineString, Point, box
 from shapely.ops import unary_union
 
-from breakneck import cli, drc, overlay, pourstitch_command, render, returnvia_command
-from breakneck.commit import (
+from kistitch import cli, drc, overlay, pourstitch_command, render, returnvia_command
+from kistitch.commit import (
     MARKER_LAYER,
     Marker,
     MarkerKind,
     eco2_segment,
     marker_items,
 )
-from breakneck.placement import RunResult
-from breakneck.plan import QUANTISATION, Plan, PlannedUnit
-from breakneck.pourstitch import Options
-from breakneck.raster import CoverageMap, Grid
-from breakneck.returnpath import (
+from kistitch.placement import RunResult
+from kistitch.plan import QUANTISATION, Plan, PlannedUnit
+from kistitch.pourstitch import Options
+from kistitch.raster import CoverageMap, Grid
+from kistitch.returnpath import (
     NoBoardOutlineError,
     Outcome,
     PlaneReturn,
     ReturnFields,
     measure_returns,
 )
-from breakneck.returnvia import NoGroundNetsError, ReferencePlane, ReturnViaOptions
-from breakneck.snapshot import (
+from kistitch.returnvia import NoGroundNetsError, ReferencePlane, ReturnViaOptions
+from kistitch.snapshot import (
     NM_PER_MM,
     Pad,
     PadKind,

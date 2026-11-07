@@ -12,7 +12,7 @@ from enum import Enum
 from itertools import pairwise
 from typing import TypeVar
 
-from breakneck.snapshot import Point2, Snapshot, ViaSize
+from kistitch.snapshot import Point2, Snapshot, ViaSize
 
 FORBIDDEN_RADIUS = 0.5
 
