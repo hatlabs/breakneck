@@ -465,13 +465,37 @@ def _read_footprint(f: kipy.board_types.FootprintInstance) -> Footprint:
     )
 
 
+class NoBoardOutlineError(ValueError):
+    def __init__(self, message: str = "Board has no closed Edge.Cuts outline") -> None:
+        super().__init__(message)
+
+
+def _edge_lines(paths: Iterable[Sequence[Point2]]) -> list[LineString]:
+    return [LineString([_snap(p) for p in path]) for path in paths if len(path) >= 2]
+
+
+def edge_paths_closed(paths: Iterable[Sequence[Point2]]) -> bool:
+    """Whether the Edge.Cuts paths form closed loops and nothing else.
+
+    An open outline around a closed cutout still polygonises to the cutout,
+    so the dangling and cut edges are what tell an open outline apart.
+    """
+    lines = _edge_lines(paths)
+    if not lines:
+        return False
+    polygons, cuts, dangles, invalid = shapely.polygonize_full(
+        shapely.get_parts(unary_union(lines))
+    )
+    return not polygons.is_empty and all(g.is_empty for g in (cuts, dangles, invalid))
+
+
 def outline_from_edge_paths(paths: Iterable[Sequence[Point2]]) -> BaseGeometry:
     """Board area polygonised from Edge.Cuts paths.
 
     Closed Edge.Cuts loops nest even-odd: a loop inside the outline is a
     cutout, a loop inside a cutout is board again.
     """
-    lines = [LineString([_snap(p) for p in path]) for path in paths if len(path) >= 2]
+    lines = _edge_lines(paths)
     if not lines:
         return Polygon()
     shells = [Polygon(f.exterior) for f in polygonize(unary_union(lines))]

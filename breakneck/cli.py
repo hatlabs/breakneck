@@ -36,6 +36,7 @@ from breakneck.plan import (
 )
 from breakneck.returnvia import DEFAULT_DISTANCE, NoGroundNetsError, ReturnViaOptions
 from breakneck.snapshot import (
+    NoBoardOutlineError,
     Snapshot,
     ViaSize,
     outline_from_edge_paths,
@@ -168,7 +169,7 @@ def execute_cut(args):
 
 
 # Placement failures that leave the board untouched and need no traceback.
-PLACEMENT_ERRORS = (SplitError, BoardChangedError)
+PLACEMENT_ERRORS = (SplitError, BoardChangedError, NoBoardOutlineError)
 
 
 @contextmanager
@@ -277,7 +278,7 @@ def _add_ground_nets_argument(parser: argparse.ArgumentParser) -> None:
 
 
 def execute_returnvia(args):
-    from breakneck import returnpath, returnvia_command
+    from breakneck import returnvia_command
 
     options = ReturnViaOptions(
         distance=args.distance,
@@ -291,7 +292,6 @@ def execute_returnvia(args):
         overlay_layers=tuple(args.overlay_layers),
     )
     with _exit_on(
-        returnpath.NoBoardOutlineError,
         NoGroundNetsError,
         breakneck.overlay.OverlayLayersError,
         *PLACEMENT_ERRORS,

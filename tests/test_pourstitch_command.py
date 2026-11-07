@@ -12,7 +12,7 @@ from breakneck.commit import MARKER_LAYER, eco2_segment
 from breakneck.placement import RunResult, RunSettings
 from breakneck.plan import POURSTITCH_POWER_DISTANCE, StitchClass
 from breakneck.pourstitch import Options
-from breakneck.snapshot import NM_PER_MM, Snapshot, ViaSize, Zone
+from breakneck.snapshot import NM_PER_MM, NoBoardOutlineError, Snapshot, ViaSize, Zone
 
 LAYERS = ("F.Cu", "B.Cu")
 POUR = box(0, 0, 10, 10)
@@ -30,10 +30,11 @@ def snapshot() -> Snapshot:
 
 
 class Board:
-    def __init__(self, enabled=(BL.BL_User_1, BL.BL_User_2), shapes=()):
+    def __init__(self, enabled=(BL.BL_User_1, BL.BL_User_2), shapes=(), outline=POUR):
         self.calls: list = []
         self.enabled = [BL.BL_F_Cu, BL.BL_B_Cu, *enabled]
         self.shapes = list(shapes)
+        self.outline = outline
         self.removed: list = []
 
     def get_copper_layer_count(self):
@@ -46,7 +47,13 @@ class Board:
         return []
 
     def get_shapes(self):
-        return self.shapes
+        if self.outline is None:
+            return list(self.shapes)
+        corners = list(self.outline.exterior.coords)
+        edges = [eco2_segment(a, b) for a, b in pairwise(corners)]
+        for e in edges:
+            e.layer = BL.BL_Edge_Cuts
+        return edges + self.shapes
 
     def refill_zones(self, block=True, max_poll_seconds=0):
         self.calls.append("refill_zones")
@@ -209,6 +216,20 @@ def test_dry_run_still_places_overlay(fakes, tmp_path: Path):
     ]
     assert len(created) == len(LAYERS)
     assert (tmp_path / "heat.png").exists()
+
+
+def test_check_without_outline_fails_before_the_refill(fakes):
+    board = Board(outline=None)
+
+    with pytest.raises(NoBoardOutlineError):
+        pourstitch_command.execute(
+            OPTIONS,
+            overlay.Outputs(),
+            check=True,
+            kicad=KiCad(board),  # type: ignore[arg-type]
+        )
+
+    assert board.calls == []
 
 
 def test_disabled_overlay_layer_fails_before_any_board_change(fakes):

@@ -21,6 +21,8 @@ from breakneck.snapshot import (
     ViaSize,
     Zone,
     arc_points,
+    circle_points,
+    edge_paths_closed,
 )
 
 FOUR_LAYERS = ("F.Cu", "In1.Cu", "In2.Cu", "B.Cu")
@@ -85,6 +87,60 @@ def test_internal_cutout_is_a_hole_in_the_outline():
     assert outline.area == pytest.approx(96)
     assert not outline.contains(Point(5, 5))
     assert outline.boundary.distance(Point(5, 4.5)) == pytest.approx(0.5)
+
+
+def test_closed_outline_with_a_cutout_is_closed():
+    assert edge_paths_closed([square_path(0, 0, 10, 10), square_path(4, 4, 6, 6)])
+
+
+def test_open_outline_is_not_closed():
+    assert not edge_paths_closed([square_path(0, 0, 10, 10)[:-1]])
+
+
+def test_open_outline_around_a_closed_cutout_is_not_closed():
+    paths = [square_path(0, 0, 10, 10)[:-1], square_path(4, 4, 6, 6)]
+
+    assert not edge_paths_closed(paths)
+
+
+def slot_paths():
+    """A 4 x 2 stadium cutout drawn as two segments and two arcs."""
+    return [
+        [(3, 4), (7, 4)],
+        arc_points((7, 4), (8, 5), (7, 6)),
+        [(7, 6), (3, 6)],
+        arc_points((3, 6), (2, 5), (3, 4)),
+    ]
+
+
+@pytest.mark.parametrize(
+    "paths",
+    [
+        [square_path(0, 0, 10, 10), *slot_paths()],
+        [square_path(0, 0, 10, 10), circle_points((5, 5), 1)],
+        [square_path(0, 0, 10, 10), square_path(10, 0, 20, 10)],
+        [square_path(0, 0, 10, 10), square_path(0, 0, 10, 10)],
+    ],
+    ids=["arc-slot", "circle-cutout", "shared-edge", "duplicate-outline"],
+)
+def test_valid_outlines_are_closed(paths):
+    assert edge_paths_closed(paths)
+
+
+@pytest.mark.parametrize(
+    "paths",
+    [
+        [square_path(0, 0, 10, 10), [(4, 5), (6, 5)]],
+        [square_path(0, 0, 10, 10), square_path(20, 0, 30, 10), [(10, 5), (20, 5)]],
+    ],
+    ids=["stray-segment", "segment-joining-outlines"],
+)
+def test_loose_edge_segments_are_not_closed(paths):
+    assert not edge_paths_closed(paths)
+
+
+def test_no_edge_paths_are_not_closed():
+    assert not edge_paths_closed([])
 
 
 def test_island_inside_a_cutout_is_board_again():
